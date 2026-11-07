@@ -1,0 +1,33 @@
+---
+import "@/styles/global.css"
+
+import { SiteHeader } from "@/components/SiteHeader"
+
+interface Props {
+  title: string
+  picture?: boolean
+}
+
+const { title, picture = false } = Astro.props
+---
+
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="generator" content={Astro.generator} />
+    <title>{title}</title>
+    <script is:inline>
+      try {
+        if (localStorage.getItem("bv-jigsaw-theme") === "light") {
+          document.documentElement.classList.remove("dark")
+        }
+      } catch {}
+    </script>
+  </head>
+  <body class="flex h-dvh flex-col overflow-hidden">
+    <SiteHeader client:load picture={picture} />
+    <slot />
+  </body>
+</html>

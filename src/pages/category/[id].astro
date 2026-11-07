@@ -1,0 +1,20 @@
+---
+import { CategoryPuzzles } from "@/components/CategoryPuzzles"
+import Base from "@/layouts/Base.astro"
+import { loadPuzzleGroups } from "@/lib/catalog"
+
+export function getStaticPaths() {
+  return loadPuzzleGroups().map((group) => ({
+    params: { id: group.id },
+    props: { group },
+  }))
+}
+
+const { group } = Astro.props
+---
+
+<Base title={`${group.title} · BV Jigsaw`}>
+  <main class="min-h-0 flex-1 overflow-y-auto">
+    <CategoryPuzzles client:load group={group} />
+  </main>
+</Base>

@@ -1,0 +1,13 @@
+---
+import { PlayedPuzzles } from "@/components/PlayedPuzzles"
+import Base from "@/layouts/Base.astro"
+import { loadPuzzleGroups } from "@/lib/catalog"
+
+const groups = loadPuzzleGroups()
+---
+
+<Base title="Last Played · BV Jigsaw">
+  <main class="min-h-0 flex-1 overflow-y-auto">
+    <PlayedPuzzles client:load groups={groups} />
+  </main>
+</Base>

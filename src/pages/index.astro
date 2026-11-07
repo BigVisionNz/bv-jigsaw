@@ -1,0 +1,13 @@
+---
+import { PuzzleGallery } from "@/components/PuzzleGallery"
+import Base from "@/layouts/Base.astro"
+import { loadPuzzleGroups } from "@/lib/catalog"
+
+const groups = loadPuzzleGroups()
+---
+
+<Base title="BV Jigsaw">
+  <main class="min-h-0 flex-1 overflow-y-auto">
+    <PuzzleGallery client:load groups={groups} />
+  </main>
+</Base>
