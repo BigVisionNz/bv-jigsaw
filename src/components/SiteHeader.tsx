@@ -12,7 +12,6 @@ import {
   DEFAULT_EDGE_COLOUR,
   getEdgeColour,
   getEdgesShown,
-  loadEdgeColour,
   loadEdgesShown,
   setEdgeColour,
   setEdgesShown,
@@ -20,9 +19,11 @@ import {
   subscribeEdgesShown,
 } from "@/lib/edge-colour"
 import { getBoardSnap, getTraySnap, loadAutoSnap, setBoardSnap, setTraySnap, subscribeAutoSnap } from "@/lib/auto-snap"
-import { DEFAULT_GRID_COLOUR, getGridColour, loadGridColour, setGridColour, subscribeGridColour } from "@/lib/grid-colour"
+import { DEFAULT_BOARD_COLOUR, getBoardColour, setBoardColour, subscribeBoardColour } from "@/lib/board-colour"
+import { DEFAULT_GRID_COLOUR, getGridColour, setGridColour, subscribeGridColour } from "@/lib/grid-colour"
 import { getHintsOn, setHintsOn, subscribeHints } from "@/lib/hints"
 import { getPictureShown, setPictureShown, subscribePicture } from "@/lib/picture"
+import { getPuzzleSolved, subscribePuzzleSolved } from "@/lib/puzzle-solved"
 
 const THEME_KEY = "bv-jigsaw-theme"
 
@@ -54,8 +55,8 @@ export function SiteHeader({ picture = false }: { picture?: boolean }) {
             <>
               <PictureToggle />
               <HintsToggle />
-              <EdgesMenu />
-              <GridColourButton />
+              <EdgesToggle />
+              <ColoursMenu />
               <AutoSnapMenu />
             </>
           ) : null}
@@ -79,13 +80,15 @@ export function SiteHeader({ picture = false }: { picture?: boolean }) {
 
 function PictureToggle() {
   const shown = useSyncExternalStore(subscribePicture, getPictureShown, () => false)
+  const solved = useSyncExternalStore(subscribePuzzleSolved, getPuzzleSolved, () => false)
 
   return (
     <ControlTip label={shown ? "Hide the finished picture" : "Show the finished picture on the board"}>
       <button
         type="button"
-        className="inline-flex h-11 items-center gap-2 rounded-full border border-border bg-background px-4 text-sm font-medium outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="inline-flex h-11 items-center gap-2 rounded-full border border-border bg-background px-4 text-sm font-medium outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-background"
         aria-pressed={shown}
+        disabled={solved}
         onClick={() => setPictureShown(!shown)}
       >
         {shown ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
@@ -113,72 +116,80 @@ function HintsToggle() {
   )
 }
 
-function EdgesMenu() {
-  const colour = useSyncExternalStore(subscribeEdgeColour, getEdgeColour, () => DEFAULT_EDGE_COLOUR)
+function EdgesToggle() {
   const shown = useSyncExternalStore(subscribeEdgesShown, getEdgesShown, () => true)
 
   useEffect(() => {
-    loadEdgeColour()
     loadEdgesShown()
   }, [])
 
   return (
-    <ControlTip label="Edge colour, and whether tray pieces show their outer edge">
-      <span className="inline-flex">
-        <DropdownMenu>
-          <DropdownMenuTrigger className="inline-flex h-11 items-center gap-2 rounded-full border border-border bg-background px-4 text-sm font-medium outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50">
-            Edges
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="center" className="w-52" style={{ width: "13rem" }}>
-        <DropdownMenuItem closeOnClick={false} className="p-0">
-          <label className="flex w-full cursor-pointer items-center gap-2 px-1.5 py-1.5">
-            <input
-              type="color"
-              value={colour}
-              aria-label="Edge colour"
-              className="size-6 shrink-0 cursor-pointer rounded border border-border bg-transparent p-0"
-              onChange={(event) => setEdgeColour(event.target.value)}
-            />
-            Edge Colour
-          </label>
-        </DropdownMenuItem>
-        <DropdownMenuItem closeOnClick={false} onClick={() => setEdgesShown(!shown)}>
-          <span
-            className={`flex size-5 items-center justify-center rounded-full text-white ${shown ? "bg-green-600" : "bg-red-600"}`}
-          >
-            {shown ? <Check className="size-3" strokeWidth={3} /> : <X className="size-3" strokeWidth={3} />}
-          </span>
-          {shown ? "Edges On" : "Edges Off"}
-        </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </span>
+    <ControlTip label={shown ? "Hide the outer edge on tray pieces" : "Show the outer edge on tray pieces"}>
+      <button
+        type="button"
+        className="inline-flex h-11 items-center gap-2 rounded-full border border-border bg-background px-4 text-sm font-medium outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
+        aria-pressed={shown}
+        onClick={() => setEdgesShown(!shown)}
+      >
+        <SnapMark on={shown} />
+        {shown ? "Edges On" : "Edges Off"}
+      </button>
     </ControlTip>
   )
 }
 
-function GridColourButton() {
-  const colour = useSyncExternalStore(subscribeGridColour, getGridColour, () => DEFAULT_GRID_COLOUR)
-
-  useEffect(() => {
-    loadGridColour()
-  }, [])
+function ColoursMenu() {
+  const grid = useSyncExternalStore(subscribeGridColour, getGridColour, () => DEFAULT_GRID_COLOUR)
+  const background = useSyncExternalStore(subscribeBoardColour, getBoardColour, () => DEFAULT_BOARD_COLOUR)
+  const edge = useSyncExternalStore(subscribeEdgeColour, getEdgeColour, () => DEFAULT_EDGE_COLOUR)
 
   return (
-    <ControlTip label="Choose the colour of the board grid">
-      <label
-        className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-full border border-border px-4 text-sm font-medium outline-none focus-within:ring-3 focus-within:ring-ring/50"
-        style={{ backgroundColor: colour, color: inkFor(colour) }}
-      >
-        Grid Colour
-        <input
-          type="color"
-          value={colour}
-          aria-label="Grid colour"
-          className="sr-only"
-          onChange={(event) => setGridColour(event.target.value)}
-        />
-      </label>
+    <ControlTip label="Choose the grid, background, and edge colour">
+      <span className="inline-flex">
+        <DropdownMenu>
+          <DropdownMenuTrigger className="inline-flex h-11 items-center gap-2 rounded-full border border-border bg-background px-4 text-sm font-medium outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50">
+            Colours
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="center" className="w-56" style={{ width: "14rem" }}>
+            <DropdownMenuItem closeOnClick={false} className="p-0">
+              <label className="flex w-full cursor-pointer items-center gap-2 px-1.5 py-1.5">
+                <input
+                  type="color"
+                  value={grid}
+                  aria-label="Grid colour"
+                  className="size-6 shrink-0 cursor-pointer rounded border border-border bg-transparent p-0"
+                  onChange={(event) => setGridColour(event.target.value)}
+                />
+                Grid Colour
+              </label>
+            </DropdownMenuItem>
+            <DropdownMenuItem closeOnClick={false} className="p-0">
+              <label className="flex w-full cursor-pointer items-center gap-2 px-1.5 py-1.5">
+                <input
+                  type="color"
+                  value={background}
+                  aria-label="Background colour"
+                  className="size-6 shrink-0 cursor-pointer rounded border border-border bg-transparent p-0"
+                  onChange={(event) => setBoardColour(event.target.value)}
+                />
+                Background Colour
+              </label>
+            </DropdownMenuItem>
+            <DropdownMenuItem closeOnClick={false} className="p-0">
+              <label className="flex w-full cursor-pointer items-center gap-2 px-1.5 py-1.5">
+                <input
+                  type="color"
+                  value={edge}
+                  aria-label="Edge colour"
+                  className="size-6 shrink-0 cursor-pointer rounded border border-border bg-transparent p-0"
+                  onChange={(event) => setEdgeColour(event.target.value)}
+                />
+                Edge Colour
+              </label>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </span>
     </ControlTip>
   )
 }
@@ -220,14 +231,6 @@ function SnapMark({ on }: { on: boolean }) {
       {on ? <Check className="size-3" strokeWidth={3} /> : <X className="size-3" strokeWidth={3} />}
     </span>
   )
-}
-
-function inkFor(hex: string) {
-  const value = Number.parseInt(hex.slice(1), 16)
-  const red = (value >> 16) & 255
-  const green = (value >> 8) & 255
-  const blue = value & 255
-  return red * 0.299 + green * 0.587 + blue * 0.114 > 150 ? "#111111" : "#ffffff"
 }
 
 function ThemeButton() {
@@ -289,10 +292,10 @@ function AccountMenu() {
 
 function JigsawMark({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 64 64" className={className} aria-hidden>
+    <svg viewBox="0 0 24 24" className={className} aria-hidden>
       <path
         fill="currentColor"
-        d="M14 14H27A5 5 0 0 0 37 14H50V27A5 5 0 0 0 50 37V50H37A5 5 0 0 1 27 50H14V37A5 5 0 0 0 14 27Z"
+        d="M20.5 11H19V7a2 2 0 0 0-2-2h-4V3.5A2.5 2.5 0 0 0 10.5 1A2.5 2.5 0 0 0 8 3.5V5H4a2 2 0 0 0-2 2v3.8h1.5c1.5 0 2.7 1.2 2.7 2.7S5 16.2 3.5 16.2H2V20a2 2 0 0 0 2 2h3.8v-1.5c0-1.5 1.2-2.7 2.7-2.7s2.7 1.2 2.7 2.7V22H17a2 2 0 0 0 2-2v-4h1.5a2.5 2.5 0 0 0 2.5-2.5a2.5 2.5 0 0 0-2.5-2.5"
       />
     </svg>
   )

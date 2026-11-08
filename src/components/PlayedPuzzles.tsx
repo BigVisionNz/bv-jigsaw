@@ -1,5 +1,7 @@
+import { ArrowLeft } from "lucide-react"
 import { useEffect, useState } from "react"
 
+import { ProgressCover } from "@/components/ProgressCover"
 import { buttonVariants } from "@/components/ui/button"
 import { Card, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { puzzleHref, resolvePlayedGames } from "@/lib/library"
@@ -34,10 +36,16 @@ export function PlayedPuzzles({ groups }: { groups: PuzzleGroup[] }) {
 
   return (
     <div className="flex w-full flex-col gap-14 px-4 py-10 sm:px-6">
-      <header className="flex max-w-2xl flex-col gap-3">
-        <h1 className="text-4xl font-semibold tracking-tight">Last Played</h1>
-        <p className="text-base text-muted-foreground">Puzzles you have finished, and puzzles still on the board.</p>
-      </header>
+      <div className="flex flex-col items-start gap-4">
+        <a href="/" className={cn(buttonVariants({ variant: "outline" }))}>
+          <ArrowLeft />
+          Back to All Jigsaws
+        </a>
+        <header className="flex max-w-2xl flex-col gap-3">
+          <h1 className="text-4xl font-semibold tracking-tight">Last Played</h1>
+          <p className="text-base text-muted-foreground">Puzzles you have finished, and puzzles still on the board.</p>
+        </header>
+      </div>
       <PlayedSection
         id="in-progress"
         title="In Progress"
@@ -91,8 +99,8 @@ function PlayedCard({ game, action }: { game: PlayedCardGame; action: string }) 
   return (
     <Card className="h-full pt-0">
       <a href={href} aria-label={`${action} ${game.puzzle.title}, ${percent}`} className="group relative block">
-        <img src={game.puzzle.image} alt="" loading="lazy" decoding="async" className="aspect-[4/3] w-full object-cover" />
-        <span className="absolute inset-0 flex items-center justify-center bg-background/70 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100">
+        <ProgressCover src={game.puzzle.image} cells={game.cells} pieces={game.pieces} />
+        <span className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100">
           <span className={cn(buttonVariants(), "pointer-events-none shadow-sm")}>
             {action} · {percent}
           </span>

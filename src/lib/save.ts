@@ -24,6 +24,7 @@ export type PlayedGame = {
   slug: string
   pieces: PieceCount
   placed: number
+  cells: boolean[]
   savedAt: number
 }
 
@@ -42,7 +43,7 @@ export function listPlayedGames(): PlayedGame[] {
       if (!isPieceCount(pieces) || !validGame(game, pieces)) return []
       const placed = game.placed.filter(Boolean).length
       if (placed === 0) return []
-      return [{ slug, pieces, placed, savedAt: game.savedAt ?? 0 }]
+      return [{ slug, pieces, placed, cells: game.placed, savedAt: game.savedAt ?? 0 }]
     })
     .sort((a, b) => b.savedAt - a.savedAt || b.placed - a.placed)
 }

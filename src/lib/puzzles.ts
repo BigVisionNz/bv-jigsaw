@@ -1,4 +1,4 @@
-export const PIECE_COUNTS = [100, 200, 400] as const
+export const PIECE_COUNTS = [100, 200, 400, 800] as const
 
 export type PieceCount = (typeof PIECE_COUNTS)[number]
 

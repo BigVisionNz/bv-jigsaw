@@ -1,9 +1,11 @@
 export const DEFAULT_EDGE_COLOUR = "#ffffff"
 
 const STORAGE_KEY = "bv-jigsaw-edge-colour"
+const MAP_KEY = "bv-jigsaw-edge-colours"
 const SHOWN_KEY = "bv-jigsaw-edges-shown"
 
 let colour = DEFAULT_EDGE_COLOUR
+let puzzle: string | null = null
 let shown = true
 const listeners = new Set<() => void>()
 const shownListeners = new Set<() => void>()
@@ -17,12 +19,18 @@ export function getEdgeColour() {
   return colour
 }
 
+export function bindEdgeColour(slug: string | null) {
+  puzzle = slug
+  loadEdgeColour()
+}
+
 export function setEdgeColour(value: string) {
   const next = normalizeColour(value)
   if (!next || next === colour) return
   colour = next
   try {
-    localStorage.setItem(STORAGE_KEY, next)
+    if (puzzle) writePuzzle(puzzle, next)
+    else localStorage.setItem(STORAGE_KEY, next)
   } catch {
     // A blocked store should not stop the colour from applying.
   }
@@ -31,11 +39,28 @@ export function setEdgeColour(value: string) {
 
 export function loadEdgeColour() {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY)
-    if (stored) setEdgeColour(stored)
+    const stored = puzzle ? readPuzzle(puzzle) ?? localStorage.getItem(STORAGE_KEY) : localStorage.getItem(STORAGE_KEY)
+    const next = (stored && normalizeColour(stored)) || DEFAULT_EDGE_COLOUR
+    if (next === colour) return
+    colour = next
+    listeners.forEach((listener) => listener())
   } catch {
     // Ignore a blocked store and keep the default.
   }
+}
+
+function readPuzzle(slug: string) {
+  const parsed = JSON.parse(localStorage.getItem(MAP_KEY) ?? "{}") as unknown
+  if (!parsed || typeof parsed !== "object") return null
+  const value = (parsed as Record<string, unknown>)[slug]
+  return typeof value === "string" ? value : null
+}
+
+function writePuzzle(slug: string, value: string) {
+  const parsed = JSON.parse(localStorage.getItem(MAP_KEY) ?? "{}") as unknown
+  const map = parsed && typeof parsed === "object" ? (parsed as Record<string, string>) : {}
+  map[slug] = value
+  localStorage.setItem(MAP_KEY, JSON.stringify(map))
 }
 
 export function subscribeEdgesShown(listener: () => void) {

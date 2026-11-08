@@ -1,15 +1,21 @@
-import { Upload } from "lucide-react"
-import { useEffect, useState, type ReactNode } from "react"
+import { ChevronLeft, ChevronRight, Upload } from "lucide-react"
+import { useEffect, useLayoutEffect, useState, useSyncExternalStore, type ReactNode } from "react"
 
 import { PieceCount } from "@/components/PieceCount"
+import { ProgressCover } from "@/components/ProgressCover"
 import { buttonVariants } from "@/components/ui/button"
 import { Card, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { ControlTip, TooltipProvider } from "@/components/ui/tooltip"
+import { completionCounts } from "@/lib/completions"
+import { getFavourites, getServerFavourites, loadFavourites, subscribeFavourites, toggleFavourite } from "@/lib/favourites"
 import { addLibraryFiles, listLibrary, puzzleHref, removeLibraryImage, resolvePlayedGames } from "@/lib/library"
-import { type PieceCount as PieceCountValue, type Puzzle, type PuzzleGroup } from "@/lib/puzzles"
+import { PIECE_COUNTS, type PieceCount as PieceCountValue, type Puzzle, type PuzzleGroup } from "@/lib/puzzles"
 import { type PlayedGame } from "@/lib/save"
 import { cn } from "cn"
 
-const LEADER_COUNT = 12
+const PAGE_SIZE = 8
+const sectionHeaderClass =
+  "-mx-4 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 bg-linear-to-b from-neutral-300 to-white px-4 py-4 sm:-mx-6 sm:px-6 dark:from-neutral-700 dark:to-black"
 const TABS = [
   { id: "default", label: "Default Images" },
   { id: "mine", label: "My Images" },
@@ -21,11 +27,15 @@ type PlayedCardGame = PlayedGame & { puzzle: Puzzle & { group: string } }
 
 export function PuzzleGallery({ groups }: { groups: PuzzleGroup[] }) {
   const [played, setPlayed] = useState<PlayedCardGame[]>([])
-  const [leaders, setLeaders] = useState<Record<string, Puzzle[]>>({})
   const [tab, setTab] = useState<ImageTab>("default")
   const [library, setLibrary] = useState<{ mine: Puzzle[]; received: Puzzle[] }>({ mine: [], received: [] })
   const [libraryTick, setLibraryTick] = useState(0)
   const [uploadError, setUploadError] = useState("")
+  const favouriteSlugs = useSyncExternalStore(subscribeFavourites, getFavourites, getServerFavourites)
+
+  useLayoutEffect(() => {
+    loadFavourites()
+  }, [])
 
   useEffect(() => {
     let revoke = () => {}
@@ -38,7 +48,6 @@ export function PuzzleGallery({ groups }: { groups: PuzzleGroup[] }) {
       revoke = result.revoke
       setPlayed(result.games)
     })
-    setLeaders(Object.fromEntries(groups.map((group) => [group.id, sample(group.puzzles, LEADER_COUNT)])))
     return () => {
       cancelled = true
       revoke()
@@ -85,15 +94,19 @@ export function PuzzleGallery({ groups }: { groups: PuzzleGroup[] }) {
 
   async function onRemove(id: string) {
     await removeLibraryImage(id)
+    if (getFavourites().includes(id)) toggleFavourite(id)
     setLibraryTick((value) => value + 1)
   }
+
+  const favourites = favouritePuzzles(groups, library, favouriteSlugs)
 
   return (
     <div className="flex w-full flex-col gap-14 px-4 py-10 sm:px-6">
       <header className="flex max-w-2xl flex-col gap-3">
         <h1 className="text-4xl font-semibold tracking-tight">Choose a puzzle</h1>
-        <p className="text-base text-muted-foreground">Choose 100, 200, or 400 pieces, then solve the puzzle.</p>
+        <p className="text-base text-muted-foreground">Choose 100, 200, 400, or 800 pieces, then solve the puzzle.</p>
       </header>
+      {favourites.length > 0 ? <Favourites puzzles={favourites} played={played} /> : null}
       <PlayedGrid games={played} />
       <div className="flex flex-col gap-8">
         <div role="tablist" aria-label="Image categories" className="flex flex-wrap gap-2">
@@ -118,26 +131,7 @@ export function PuzzleGallery({ groups }: { groups: PuzzleGroup[] }) {
         {tab === "default" ? (
           <div role="tabpanel" id="default-panel" aria-labelledby="default-tab" className="flex flex-col gap-14">
             {groups.map((group) => (
-              <section key={group.id} aria-labelledby={group.id} className="flex flex-col gap-5">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex max-w-2xl flex-col gap-1">
-                    <h2 id={group.id} className="text-2xl font-semibold tracking-tight">
-                      {group.title}
-                    </h2>
-                    {group.description ? <p className="text-sm text-muted-foreground">{group.description}</p> : null}
-                  </div>
-                  <a href={`/category/${group.id}`} className={cn(buttonVariants({ variant: "outline" }), "shrink-0")}>
-                    View All
-                  </a>
-                </div>
-                <ul className="grid grid-cols-4 gap-4">
-                  {(leaders[group.id] ?? []).map((puzzle) => (
-                    <li key={puzzle.slug}>
-                      <PuzzleCard puzzle={puzzle} played={played} />
-                    </li>
-                  ))}
-                </ul>
-              </section>
+              <CategorySection key={group.id} group={group} played={played} />
             ))}
           </div>
         ) : null}
@@ -197,20 +191,41 @@ function LibraryPanel({
   error?: string
   onRemove?: (id: string) => void
 }) {
+  const [page, setPage] = useState(0)
+  const label = id === "mine" ? "My Images" : "Received Images"
   return (
     <div role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-tab`} className="flex flex-col gap-5">
-      {action || error ? (
-        <div className="flex flex-wrap items-center gap-3">
-          {action}
-          {error ? <p className="text-sm text-destructive">{error}</p> : null}
-        </div>
-      ) : null}
       {pictures.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{empty}</p>
+        <>
+          {action || error ? (
+            <div className="flex flex-wrap items-center gap-3">
+              {action}
+              {error ? <p className="text-sm text-destructive">{error}</p> : null}
+            </div>
+          ) : null}
+          <p className="text-sm text-muted-foreground">{empty}</p>
+        </>
       ) : (
-        <ul className="grid grid-cols-4 gap-4">
-          {pictures.map((puzzle) => (
-            <li key={puzzle.slug} className="flex flex-col gap-2">
+        <>
+          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          <SectionHeader
+            id={`${id}-heading`}
+            title={label}
+            label={label}
+            count={pictures.length}
+            page={page}
+            onPage={setPage}
+            action={action}
+          />
+          <PagedImages
+          label={label}
+          listId={`${id}-page`}
+          items={pictures}
+          page={page}
+          onPage={setPage}
+          itemKey={(puzzle) => puzzle.slug}
+          renderItem={(puzzle) => (
+            <div className="flex flex-col gap-2">
               <PuzzleCard puzzle={puzzle} played={played} />
               {onRemove ? (
                 <button
@@ -221,40 +236,119 @@ function LibraryPanel({
                   Remove
                 </button>
               ) : null}
-            </li>
-          ))}
-        </ul>
+            </div>
+          )}
+        />
+        </>
       )}
     </div>
   )
 }
 
-function PlayedGrid({ games }: { games: PlayedCardGame[] }) {
-  const shown = games.slice(0, LEADER_COUNT)
+function CategorySection({ group, played }: { group: PuzzleGroup; played: PlayedCardGame[] }) {
+  const [page, setPage] = useState(0)
+  return (
+    <section aria-labelledby={group.id} className="flex flex-col gap-5">
+      <SectionHeader
+        id={group.id}
+        title={group.title}
+        description={group.description}
+        label={group.title}
+        count={group.puzzles.length}
+        page={page}
+        onPage={setPage}
+        action={
+          <a href={`/category/${group.id}`} className={cn(buttonVariants({ variant: "outline" }), "shrink-0")}>
+            View All
+          </a>
+        }
+      />
+      <PagedImages
+        label={group.title}
+        listId={`${group.id}-page`}
+        items={group.puzzles}
+        page={page}
+        onPage={setPage}
+        itemKey={(puzzle) => puzzle.slug}
+        renderItem={(puzzle) => <PuzzleCard puzzle={puzzle} played={played} />}
+      />
+    </section>
+  )
+}
 
+function Favourites({ puzzles, played }: { puzzles: Puzzle[]; played: PlayedCardGame[] }) {
+  const [page, setPage] = useState(0)
+  return (
+    <section aria-labelledby="favourites" className="flex flex-col gap-5">
+      <SectionHeader
+        id="favourites"
+        title="Favourites"
+        description="Puzzles you have marked with a heart."
+        label="Favourites"
+        count={puzzles.length}
+        page={page}
+        onPage={setPage}
+      />
+      <PagedImages
+        label="Favourites"
+        listId="favourites-page"
+        items={puzzles}
+        page={page}
+        onPage={setPage}
+        itemKey={(puzzle) => puzzle.slug}
+        renderItem={(puzzle) => <PuzzleCard puzzle={puzzle} played={played} />}
+      />
+    </section>
+  )
+}
+
+function favouritePuzzles(
+  groups: PuzzleGroup[],
+  library: { mine: Puzzle[]; received: Puzzle[] },
+  slugs: readonly string[],
+) {
+  const bySlug = new Map<string, Puzzle>()
+  for (const group of groups) {
+    for (const puzzle of group.puzzles) bySlug.set(puzzle.slug, puzzle)
+  }
+  for (const puzzle of library.mine) bySlug.set(puzzle.slug, puzzle)
+  for (const puzzle of library.received) bySlug.set(puzzle.slug, puzzle)
+  return slugs.flatMap((slug) => {
+    const puzzle = bySlug.get(slug)
+    return puzzle ? [puzzle] : []
+  })
+}
+
+function PlayedGrid({ games }: { games: PlayedCardGame[] }) {
+  const [page, setPage] = useState(0)
   return (
     <section aria-labelledby="played" className="flex flex-col gap-5">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex max-w-2xl flex-col gap-1">
-          <h2 id="played" className="text-2xl font-semibold tracking-tight">
-            Last Played
-          </h2>
-          <p className="text-sm text-muted-foreground">Puzzles you have started, newest first.</p>
-        </div>
-        <a href="/played" className={cn(buttonVariants({ variant: "outline" }), "shrink-0")}>
-          View All
-        </a>
-      </div>
-      {shown.length === 0 ? (
+      <SectionHeader
+        id="played"
+        title="Last Played"
+        description="Puzzles you have started, newest first."
+        label="Last Played"
+        count={games.length}
+        page={page}
+        onPage={setPage}
+        action={
+          <a href="/played" className={cn(buttonVariants({ variant: "outline" }), "shrink-0")}>
+            View All
+          </a>
+        }
+      />
+      {games.length === 0 ? (
         <p className="text-sm text-muted-foreground">No puzzles played yet.</p>
       ) : (
-        <ul className="grid grid-cols-4 gap-4">
-          {shown.map((game) => (
-            <li key={`${game.slug}:${game.pieces}`}>
-              <PlayedCard game={game} />
-            </li>
-          ))}
-        </ul>
+        <PagedImages
+          label="Last Played"
+          listId="played-page"
+          items={games}
+          page={page}
+          onPage={setPage}
+          itemKey={(game) => `${game.slug}:${game.pieces}`}
+          renderItem={(game) => <PlayedCard game={game} />}
+        />
       )}
     </section>
   )
@@ -267,11 +361,11 @@ function PlayedCard({ game }: { game: PlayedCardGame }) {
   return (
     <Card className="h-full pt-0">
       <a href={href} aria-label={`Continue ${game.puzzle.title}, ${percent}`} className="group relative block">
-        <img src={game.puzzle.image} alt="" loading="lazy" decoding="async" className="aspect-[4/3] w-full object-cover" />
+        <ProgressCover src={game.puzzle.image} cells={game.cells} pieces={game.pieces} />
         <ActionOverlay label="Continue" percent={percent} />
       </a>
       <CardHeader>
-        <CardTitle>{game.puzzle.title}</CardTitle>
+        <PuzzleName title={game.puzzle.title} slug={game.slug} />
         <p className="text-sm text-muted-foreground">
           <span className="font-medium text-foreground tabular-nums">{game.placed}</span> of {game.pieces} pieces
         </p>
@@ -294,11 +388,12 @@ export function PuzzleCard({ puzzle, played }: { puzzle: Puzzle; played: PlayedG
   return (
     <Card className="h-full pt-0">
       <a href={href} aria-label={percent ? `Solve ${puzzle.title}, ${percent}` : `Solve ${puzzle.title}`} className="group relative block">
-        <img src={puzzle.image} alt="" loading="lazy" decoding="async" className="aspect-[4/3] w-full object-cover" />
+        <ProgressCover src={puzzle.image} cells={progress?.cells} pieces={pieces} />
         <ActionOverlay label="Solve Puzzle" percent={percent} />
       </a>
       <CardHeader>
-        <CardTitle>{puzzle.title}</CardTitle>
+        <PuzzleName title={puzzle.title} slug={puzzle.slug} />
+        <CompletionBadges slug={puzzle.slug} played={played} />
         <PieceCount value={pieces} onChange={setPieces} />
       </CardHeader>
       <CardFooter>
@@ -310,9 +405,92 @@ export function PuzzleCard({ puzzle, played }: { puzzle: Puzzle; played: PlayedG
   )
 }
 
+function PuzzleName({ title, slug }: { title: string; slug: string }) {
+  return (
+    <div className="flex items-start justify-between gap-2">
+      <CardTitle className="min-w-0 flex-1">{title}</CardTitle>
+      <FavouriteButton title={title} slug={slug} />
+    </div>
+  )
+}
+
+function FavouriteButton({ title, slug }: { title: string; slug: string }) {
+  const favourites = useSyncExternalStore(subscribeFavourites, getFavourites, getServerFavourites)
+  const selected = favourites.includes(slug)
+
+  useLayoutEffect(() => {
+    loadFavourites()
+  }, [])
+
+  return (
+    <TooltipProvider>
+      <ControlTip label={selected ? "Unmark Favourite" : "Mark as Favourite"}>
+        <button
+          type="button"
+          aria-pressed={selected}
+          aria-label={selected ? `Remove ${title} from favourites` : `Add ${title} to favourites`}
+          className="group inline-flex size-7 shrink-0 items-center justify-center rounded-full text-foreground outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
+          onClick={() => toggleFavourite(slug)}
+        >
+          <FavouriteIcon filled={selected} className="size-5 transition-transform duration-150 group-hover:scale-110" />
+        </button>
+      </ControlTip>
+    </TooltipProvider>
+  )
+}
+
+function FavouriteIcon({ filled, className }: { filled: boolean; className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden>
+      <path
+        fill="currentColor"
+        d={
+          filled
+            ? "M12,21.35L10.55,20.03C5.4,15.36 2,12.27 2,8.5C2,5.41 4.42,3 7.5,3C9.24,3 10.91,3.81 12,5.08C13.09,3.81 14.76,3 16.5,3C19.58,3 22,5.41 22,8.5C22,12.27 18.6,15.36 13.45,20.03L12,21.35Z"
+            : "M12.1 18.55L12 18.65L11.89 18.55C7.14 14.24 4 11.39 4 8.5C4 6.5 5.5 5 7.5 5C9.04 5 10.54 6 11.07 7.36H12.93C13.46 6 14.96 5 16.5 5C18.5 5 20 6.5 20 8.5C20 11.39 16.86 14.24 12.1 18.55M16.5 3C14.76 3 13.09 3.81 12 5.08C10.91 3.81 9.24 3 7.5 3C4.42 3 2 5.41 2 8.5C2 12.27 5.4 15.36 10.55 20.03L12 21.35L13.45 20.03C18.6 15.36 22 12.27 22 8.5C22 5.41 19.58 3 16.5 3Z"
+        }
+      />
+    </svg>
+  )
+}
+
+function CompletionBadges({ slug, played }: { slug: string; played: PlayedGame[] }) {
+  const [stored, setStored] = useState<Record<PieceCountValue, number>>({ 100: 0, 200: 0, 400: 0, 800: 0 })
+  useEffect(() => {
+    setStored(completionCounts(slug))
+  }, [slug])
+
+  return (
+    <ul className="flex flex-wrap gap-1.5" aria-label="Completions">
+      {PIECE_COUNTS.map((count) => {
+        const finished = played.some((game) => game.slug === slug && game.pieces === count && game.placed >= count)
+        const times = Math.max(stored[count] ?? 0, finished ? 1 : 0)
+        return (
+          <li key={count}>
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full bg-muted py-0.5 pr-0.5 pl-2 text-xs text-muted-foreground"
+              aria-label={`${count} pieces completed ${times} ${times === 1 ? "time" : "times"}`}
+            >
+              {count}
+              <span
+                className={cn(
+                  "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-semibold tabular-nums",
+                  times > 0 ? "bg-primary text-primary-foreground" : "bg-foreground/10 text-foreground",
+                )}
+              >
+                {times}
+              </span>
+            </span>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
 function ActionOverlay({ label, percent }: { label: string; percent: string | null }) {
   return (
-    <span className="absolute inset-0 flex items-center justify-center bg-background/70 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100">
+    <span className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100">
       <span className={cn(buttonVariants(), "pointer-events-none shadow-sm")}>
         {percent ? `${label} · ${percent}` : label}
       </span>
@@ -320,13 +498,147 @@ function ActionOverlay({ label, percent }: { label: string; percent: string | nu
   )
 }
 
-function sample<T>(values: T[], count: number) {
-  const copy = [...values]
-  for (let index = copy.length - 1; index > 0; index -= 1) {
-    const swap = Math.floor(Math.random() * (index + 1))
-    ;[copy[index], copy[swap]] = [copy[swap], copy[index]]
-  }
-  return copy.slice(0, count)
+function SectionHeader({
+  id,
+  title,
+  description,
+  label,
+  count,
+  page,
+  onPage,
+  action,
+}: {
+  id: string
+  title: string
+  description?: string
+  label: string
+  count: number
+  page: number
+  onPage: (page: number) => void
+  action?: ReactNode
+}) {
+  const pageCount = imagePageCount(count)
+  const current = pageCount === 0 ? 0 : Math.min(page, pageCount - 1)
+  return (
+    <div className={sectionHeaderClass}>
+      <div className="flex min-w-0 max-w-2xl flex-col gap-1 justify-self-start">
+        <h2 id={id} className="text-2xl font-semibold tracking-tight">
+          {title}
+        </h2>
+        {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
+      </div>
+      <PageBadges label={label} page={current} pageCount={pageCount} onPage={onPage} />
+      <div className="justify-self-end">{action}</div>
+    </div>
+  )
+}
+
+function PageBadges({
+  label,
+  page,
+  pageCount,
+  onPage,
+}: {
+  label: string
+  page: number
+  pageCount: number
+  onPage: (page: number) => void
+}) {
+  if (pageCount === 0) return null
+  return (
+    <div className="flex max-w-md flex-wrap items-center justify-center gap-1.5" role="group" aria-label={`${label} pages`}>
+      <span aria-hidden className="pr-1 text-sm font-medium">Pages</span>
+      {Array.from({ length: pageCount }, (_, index) => {
+        const current = index === page
+        return (
+          <button
+            key={index}
+            type="button"
+            aria-current={current ? "page" : undefined}
+            aria-label={`${label}, page ${index + 1}`}
+            className={cn(
+              "inline-flex h-7 min-w-7 items-center justify-center rounded-full px-2 text-xs font-semibold tabular-nums outline-none transition-transform hover:scale-110 focus-visible:ring-3 focus-visible:ring-ring/50",
+              current ? "bg-primary text-primary-foreground" : "bg-foreground/10 text-foreground hover:bg-muted",
+            )}
+            onClick={() => onPage(index)}
+          >
+            {index + 1}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function imagePageCount(count: number) {
+  return count > 0 ? Math.ceil(count / PAGE_SIZE) : 0
+}
+
+function PagedImages<T>({
+  label,
+  listId,
+  items,
+  page,
+  onPage,
+  itemKey,
+  renderItem,
+}: {
+  label: string
+  listId: string
+  items: T[]
+  page: number
+  onPage: (page: number) => void
+  itemKey: (item: T) => string
+  renderItem: (item: T) => ReactNode
+}) {
+  const pageCount = Math.max(1, Math.ceil(items.length / PAGE_SIZE))
+  const current = Math.min(page, pageCount - 1)
+  const visible = items.slice(current * PAGE_SIZE, current * PAGE_SIZE + PAGE_SIZE)
+
+  return (
+    <div className="flex items-center gap-3">
+      {pageCount > 1 ? (
+        <PageArrow direction="previous" label={label} listId={listId} disabled={current === 0} onClick={() => onPage(current - 1)} />
+      ) : null}
+      <ul id={listId} className="grid min-w-0 flex-1 grid-cols-4 gap-4">
+        {visible.map((item) => (
+          <li key={itemKey(item)}>{renderItem(item)}</li>
+        ))}
+      </ul>
+      {pageCount > 1 ? (
+        <PageArrow direction="next" label={label} listId={listId} disabled={current === pageCount - 1} onClick={() => onPage(current + 1)} />
+      ) : null}
+    </div>
+  )
+}
+
+function PageArrow({
+  direction,
+  label,
+  listId,
+  disabled,
+  onClick,
+}: {
+  direction: "previous" | "next"
+  label: string
+  listId: string
+  disabled: boolean
+  onClick: () => void
+}) {
+  const name = direction === "previous" ? `Previous ${label}` : `Next ${label}`
+  const Icon = direction === "previous" ? ChevronLeft : ChevronRight
+  return (
+    <button
+      type="button"
+      aria-label={name}
+      aria-controls={listId}
+      disabled={disabled}
+      className={cn(buttonVariants({ variant: "outline", size: "icon-lg" }), "rounded-full")}
+      onClick={onClick}
+    >
+      <Icon className="size-5 transition-transform group-hover/button:scale-110" />
+    </button>
+  )
 }
 
 function percentComplete(placed: number, pieces: number) {
