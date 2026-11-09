@@ -1,5 +1,5 @@
-import { ChevronLeft, ChevronRight, Upload } from "lucide-react"
-import { useEffect, useLayoutEffect, useState, useSyncExternalStore, type ReactNode } from "react"
+import { ChevronLeft, ChevronRight } from "lucide-react"
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type TransitionEvent } from "react"
 
 import { PIECE_MEDAL, PieceCount } from "@/components/PieceCount"
 import { ProgressCover } from "@/components/ProgressCover"
@@ -8,8 +8,8 @@ import { Card, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { ControlTip, TooltipProvider } from "@/components/ui/tooltip"
 import { completionCounts } from "@/lib/completions"
-import { getFavourites, getServerFavourites, loadFavourites, subscribeFavourites, toggleFavourite } from "@/lib/favourites"
-import { addLibraryFiles, listLibrary, puzzleHref, removeLibraryImage, resolvePlayedGames } from "@/lib/library"
+import { getFavourites, getServerFavourites, loadFavourites, subscribeFavourites } from "@/lib/favourites"
+import { listLibrary, puzzleHref, resolvePlayedGames } from "@/lib/library"
 import { setEdgeStyleFor } from "@/lib/edge-style"
 import { PIECE_COUNTS, type PieceCount as PieceCountValue, type Puzzle, type PuzzleGroup } from "@/lib/puzzles"
 import { type PlayedGame } from "@/lib/save"
@@ -18,21 +18,11 @@ import { cn } from "cn"
 const PAGE_SIZE = 8
 const sectionHeaderClass =
   "-mx-4 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 bg-linear-to-b from-neutral-300 to-white px-4 py-4 sm:-mx-6 sm:px-6 dark:from-neutral-700 dark:to-black"
-const TABS = [
-  { id: "default", label: "Default Images" },
-  { id: "mine", label: "My Images" },
-  { id: "received", label: "Received Images" },
-] as const
-
-type ImageTab = (typeof TABS)[number]["id"]
-type PlayedCardGame = PlayedGame & { puzzle: Puzzle & { group: string } }
+export type PlayedCardGame = PlayedGame & { puzzle: Puzzle & { group: string } }
 
 export function PuzzleGallery({ groups }: { groups: PuzzleGroup[] }) {
   const [played, setPlayed] = useState<PlayedCardGame[]>([])
-  const [tab, setTab] = useState<ImageTab>("default")
   const [library, setLibrary] = useState<{ mine: Puzzle[]; received: Puzzle[] }>({ mine: [], received: [] })
-  const [libraryTick, setLibraryTick] = useState(0)
-  const [uploadError, setUploadError] = useState("")
   const favouriteSlugs = useSyncExternalStore(subscribeFavourites, getFavourites, getServerFavourites)
 
   useLayoutEffect(() => {
@@ -54,7 +44,7 @@ export function PuzzleGallery({ groups }: { groups: PuzzleGroup[] }) {
       cancelled = true
       revoke()
     }
-  }, [groups, libraryTick])
+  }, [groups])
 
   useEffect(() => {
     let cancelled = false
@@ -79,28 +69,16 @@ export function PuzzleGallery({ groups }: { groups: PuzzleGroup[] }) {
       cancelled = true
       urls.forEach((url) => URL.revokeObjectURL(url))
     }
-  }, [libraryTick])
-
-  async function onUpload(files: FileList | null) {
-    const selected = [...(files ?? [])]
-    if (selected.length === 0) return
-    const images = selected.filter((file) => file.type.startsWith("image/"))
-    if (images.length === 0) {
-      setUploadError("Choose a picture file.")
-      return
-    }
-    setUploadError("")
-    await addLibraryFiles(images)
-    setLibraryTick((value) => value + 1)
-  }
-
-  async function onRemove(id: string) {
-    await removeLibraryImage(id)
-    if (getFavourites().includes(id)) toggleFavourite(id)
-    setLibraryTick((value) => value + 1)
-  }
+  }, [])
 
   const favourites = favouritePuzzles(groups, library, favouriteSlugs)
+  const cards = [
+    collectionCard("played", "Recently Played", played.length, played[0]?.puzzle.image),
+    ...(favourites.length > 0 ? [collectionCard("favourites", "Favourites", favourites.length, favourites[0]?.image)] : []),
+    collectionCard("mine", "My Images", library.mine.length, library.mine[0]?.image),
+    collectionCard("received", "Received Images", library.received.length, library.received[0]?.image),
+    ...groups.map((group) => collectionCard(group.id, group.title, group.puzzles.length, group.puzzles[0]?.image)),
+  ]
 
   return (
     <div className="flex w-full flex-col gap-14 px-4 py-10 sm:px-6">
@@ -108,199 +86,41 @@ export function PuzzleGallery({ groups }: { groups: PuzzleGroup[] }) {
         <h1 className="text-4xl font-semibold tracking-tight">Choose a puzzle</h1>
         <p className="text-base text-muted-foreground">Choose 100, 200, 400, or 800 pieces, then solve the puzzle.</p>
       </header>
-      <PlayedGrid games={played} />
-      {favourites.length > 0 ? <Favourites puzzles={favourites} played={played} /> : null}
-      <div className="flex flex-col gap-8">
-        <div role="tablist" aria-label="Image categories" className="flex flex-wrap gap-2">
-          {TABS.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              role="tab"
-              id={`${item.id}-tab`}
-              aria-controls={`${item.id}-panel`}
-              aria-selected={tab === item.id}
-              className={cn(
-                "rounded-full border px-4 py-2 text-sm font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
-                tab === item.id ? "border-primary bg-primary text-primary-foreground" : "border-border hover:bg-muted",
-              )}
-              onClick={() => setTab(item.id)}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-        {tab === "default" ? (
-          <div role="tabpanel" id="default-panel" aria-labelledby="default-tab" className="flex flex-col gap-14">
-            {groups.map((group) => (
-              <CategorySection key={group.id} group={group} played={played} />
-            ))}
-          </div>
-        ) : null}
-        {tab === "mine" ? (
-          <LibraryPanel
-            id="mine"
-            pictures={library.mine}
-            played={played}
-            empty="Upload a picture to turn it into a puzzle."
-            action={
-              <label className={cn(buttonVariants(), "cursor-pointer")}>
-                <Upload />
-                Upload image
-                <input
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp,image/gif,image/avif"
-                  multiple
-                  className="sr-only"
-                  onChange={(event) => {
-                    void onUpload(event.target.files)
-                    event.target.value = ""
-                  }}
-                />
-              </label>
-            }
-            error={uploadError}
-            onRemove={onRemove}
-          />
-        ) : null}
-        {tab === "received" ? (
-          <LibraryPanel
-            id="received"
-            pictures={library.received}
-            played={played}
-            empty="No images from friends yet."
-          />
-        ) : null}
-      </div>
+      <ul className="grid grid-cols-4 gap-4">
+        {cards.map((card) => (
+          <li key={card.id}>
+            <CollectionCard card={card} />
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }
 
-function LibraryPanel({
-  id,
-  pictures,
-  played,
-  empty,
-  action,
-  error,
-  onRemove,
-}: {
-  id: ImageTab
-  pictures: Puzzle[]
-  played: PlayedCardGame[]
-  empty: string
-  action?: ReactNode
-  error?: string
-  onRemove?: (id: string) => void
-}) {
-  const [page, setPage] = useState(0)
-  const label = id === "mine" ? "My Images" : "Received Images"
-  return (
-    <div role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-tab`} className="flex flex-col gap-5">
-      {pictures.length === 0 ? (
-        <>
-          {action || error ? (
-            <div className="flex flex-wrap items-center gap-3">
-              {action}
-              {error ? <p className="text-sm text-destructive">{error}</p> : null}
-            </div>
-          ) : null}
-          <p className="text-sm text-muted-foreground">{empty}</p>
-        </>
-      ) : (
-        <>
-          {error ? <p className="text-sm text-destructive">{error}</p> : null}
-          <SectionHeader
-            id={`${id}-heading`}
-            title={label}
-            label={label}
-            count={pictures.length}
-            page={page}
-            onPage={setPage}
-            action={action}
-          />
-          <PagedImages
-          label={label}
-          listId={`${id}-page`}
-          items={pictures}
-          page={page}
-          onPage={setPage}
-          itemKey={(puzzle) => puzzle.slug}
-          renderItem={(puzzle) => (
-            <div className="flex flex-col gap-2">
-              <PuzzleCard puzzle={puzzle} played={played} />
-              {onRemove ? (
-                <button
-                  type="button"
-                  className="self-start text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-                  onClick={() => onRemove(puzzle.slug)}
-                >
-                  Remove
-                </button>
-              ) : null}
-            </div>
-          )}
-        />
-        </>
-      )}
-    </div>
-  )
+function collectionCard(id: string, title: string, count: number, image?: string) {
+  const detail = count === 0 ? "No puzzles yet" : `${count} ${count === 1 ? "puzzle" : "puzzles"}`
+  return { id, title, count, image: count > 0 ? image : undefined, detail }
 }
 
-function CategorySection({ group, played }: { group: PuzzleGroup; played: PlayedCardGame[] }) {
-  const [page, setPage] = useState(0)
+function CollectionCard({ card }: { card: { id: string; title: string; image?: string; detail: string } }) {
   return (
-    <section aria-labelledby={group.id} className="flex flex-col gap-5">
-      <SectionHeader
-        id={group.id}
-        title={group.title}
-        description={group.description}
-        label={group.title}
-        count={group.puzzles.length}
-        page={page}
-        onPage={setPage}
-        action={
-          <a href={`/category/${group.id}`} className={cn(buttonVariants({ variant: "outline" }), "shrink-0")}>
-            View All
-          </a>
-        }
-      />
-      <PagedImages
-        label={group.title}
-        listId={`${group.id}-page`}
-        items={group.puzzles}
-        page={page}
-        onPage={setPage}
-        itemKey={(puzzle) => puzzle.slug}
-        renderItem={(puzzle) => <PuzzleCard puzzle={puzzle} played={played} />}
-      />
-    </section>
-  )
-}
-
-function Favourites({ puzzles, played }: { puzzles: Puzzle[]; played: PlayedCardGame[] }) {
-  const [page, setPage] = useState(0)
-  return (
-    <section aria-labelledby="favourites" className="flex flex-col gap-5">
-      <SectionHeader
-        id="favourites"
-        title="Favourites"
-        description="Puzzles you have marked with a heart."
-        label="Favourites"
-        count={puzzles.length}
-        page={page}
-        onPage={setPage}
-      />
-      <PagedImages
-        label="Favourites"
-        listId="favourites-page"
-        items={puzzles}
-        page={page}
-        onPage={setPage}
-        itemKey={(puzzle) => puzzle.slug}
-        renderItem={(puzzle) => <PuzzleCard puzzle={puzzle} played={played} />}
-      />
-    </section>
+    <Card className="h-full pt-0">
+      <a href={`/collection/${card.id}`} aria-label={`Open ${card.title}`} className="group block">
+        {card.image ? (
+          <span className="relative block aspect-[4/3] overflow-hidden">
+            <img src={card.image} alt="" className="size-full object-cover" />
+          </span>
+        ) : (
+          <span className="flex aspect-[4/3] items-center justify-center bg-muted px-4 text-center text-lg font-semibold tracking-tight">
+            {card.title}
+          </span>
+        )}
+      </a>
+      <CardHeader>
+        <CardTitle>{card.title}</CardTitle>
+        <p className="text-sm text-muted-foreground">{card.detail}</p>
+      </CardHeader>
+    </Card>
   )
 }
 
@@ -321,48 +141,14 @@ function favouritePuzzles(
   })
 }
 
-function PlayedGrid({ games }: { games: PlayedCardGame[] }) {
-  const [page, setPage] = useState(0)
-  return (
-    <section aria-labelledby="played" className="flex flex-col gap-5">
-      <SectionHeader
-        id="played"
-        title="Recently Played"
-        description="Puzzles you have started, newest first."
-        label="Recently Played"
-        count={games.length}
-        page={page}
-        onPage={setPage}
-        action={
-          <a href="/played" className={cn(buttonVariants({ variant: "outline" }), "shrink-0")}>
-            View All
-          </a>
-        }
-      />
-      {games.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No puzzles played yet.</p>
-      ) : (
-        <PagedImages
-          label="Recently Played"
-          listId="played-page"
-          items={games}
-          page={page}
-          onPage={setPage}
-          itemKey={(game) => `${game.slug}:${game.pieces}`}
-          renderItem={(game) => <PlayedCard game={game} />}
-        />
-      )}
-    </section>
-  )
-}
 
-function PlayedCard({ game }: { game: PlayedCardGame }) {
+export function PlayedCard({ game }: { game: PlayedCardGame }) {
   const href = puzzleHref(game.slug, game.pieces)
   const percent = percentComplete(game.placed, game.pieces)
 
   return (
     <Card className="h-full pt-0">
-      <a href={href} aria-label={`Continue ${game.puzzle.title}, ${percent}`} className="group relative block">
+      <a href={href} data-astro-reload aria-label={`Continue ${game.puzzle.title}, ${percent}`} className="group relative block">
         <ProgressCover src={game.puzzle.image} cells={game.cells} pieces={game.pieces} />
         <ActionOverlay label="Continue" percent={percent} />
       </a>
@@ -376,7 +162,7 @@ function PlayedCard({ game }: { game: PlayedCardGame }) {
         </div>
       </CardHeader>
       <CardFooter>
-        <a href={href} className={cn(buttonVariants(), "w-full")}>
+        <a href={href} data-astro-reload className={cn(buttonVariants(), "w-full")}>
           Continue · {percent}
         </a>
       </CardFooter>
@@ -392,7 +178,7 @@ export function PuzzleCard({ puzzle, played }: { puzzle: Puzzle; played: PlayedG
 
   return (
     <Card className="h-full pt-0">
-      <a href={href} aria-label={percent ? `Solve ${puzzle.title}, ${percent}` : `Solve ${puzzle.title}`} className="group relative block">
+      <a href={href} data-astro-reload aria-label={percent ? `Solve ${puzzle.title}, ${percent}` : `Solve ${puzzle.title}`} className="group relative block">
         <ProgressCover src={puzzle.image} cells={progress?.cells} pieces={pieces} />
         <ActionOverlay label="Solve Puzzle" percent={percent} />
       </a>
@@ -413,7 +199,7 @@ export function PuzzleCard({ puzzle, played }: { puzzle: Puzzle; played: PlayedG
         </div>
       </CardHeader>
       <CardFooter>
-        <a href={href} className={cn(buttonVariants(), "w-full")}>
+        <a href={href} data-astro-reload className={cn(buttonVariants(), "w-full")}>
           {percent ? `Solve Puzzle · ${percent}` : "Solve Puzzle"}
         </a>
       </CardFooter>
@@ -517,7 +303,7 @@ function ActionOverlay({ label, percent }: { label: string; percent: string | nu
   )
 }
 
-function SectionHeader({
+export function SectionHeader({
   id,
   title,
   description,
@@ -589,11 +375,13 @@ function PageBadges({
   )
 }
 
+type PageMotion = { from: number; to: number; dir: 1 | -1; shift: boolean }
+
 function imagePageCount(count: number) {
   return count > 0 ? Math.ceil(count / PAGE_SIZE) : 0
 }
 
-function PagedImages<T>({
+export function PagedImages<T>({
   label,
   listId,
   items,
@@ -612,20 +400,71 @@ function PagedImages<T>({
 }) {
   const pageCount = Math.max(1, Math.ceil(items.length / PAGE_SIZE))
   const current = Math.min(page, pageCount - 1)
-  const visible = items.slice(current * PAGE_SIZE, current * PAGE_SIZE + PAGE_SIZE)
+  const [shown, setShown] = useState(current)
+  const shownRef = useRef(current)
+  const [motion, setMotion] = useState<PageMotion | null>(null)
+  shownRef.current = shown
+
+  useLayoutEffect(() => {
+    const from = shownRef.current
+    if (current === from) return
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setShown(current)
+      setMotion(null)
+      return
+    }
+    setMotion({ from, to: current, dir: current > from ? 1 : -1, shift: false })
+    const frame = requestAnimationFrame(() => {
+      setMotion((value) => (value && value.to === current ? { ...value, shift: true } : value))
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [current])
+
+  useEffect(() => {
+    if (!motion?.shift) return
+    const timer = window.setTimeout(() => {
+      setShown(motion.to)
+      setMotion(null)
+    }, 500)
+    return () => window.clearTimeout(timer)
+  }, [motion])
+
+  function finish(event: TransitionEvent<HTMLDivElement>) {
+    if (event.target !== event.currentTarget || event.propertyName !== "transform" || !motion?.shift) return
+    setShown(motion.to)
+    setMotion(null)
+  }
+
+  function pageItems(index: number) {
+    return items.slice(index * PAGE_SIZE, index * PAGE_SIZE + PAGE_SIZE)
+  }
+
+  const moving = motion != null
+  const panels = motion ? (motion.dir === 1 ? [motion.from, motion.to] : [motion.to, motion.from]) : [shown]
+  const offset = !motion ? "0%" : motion.dir === 1 ? (motion.shift ? "-50%" : "0%") : motion.shift ? "0%" : "-50%"
 
   return (
     <div className="flex items-center gap-3">
       {pageCount > 1 ? (
-        <PageArrow direction="previous" label={label} listId={listId} disabled={current === 0} onClick={() => onPage(current - 1)} />
+        <PageArrow direction="previous" label={label} listId={listId} disabled={moving || current === 0} onClick={() => onPage(current - 1)} />
       ) : null}
-      <ul id={listId} className="grid min-w-0 flex-1 grid-cols-4 gap-4">
-        {visible.map((item) => (
-          <li key={itemKey(item)}>{renderItem(item)}</li>
-        ))}
-      </ul>
+      <div id={listId} className="min-w-0 flex-1 overflow-hidden">
+        <div
+          className={cn("flex", motion && "w-[200%]", motion?.shift && "page-slide")}
+          style={{ transform: `translateX(${offset})` }}
+          onTransitionEnd={finish}
+        >
+          {panels.map((index) => (
+            <ul key={`${motion ? "move" : "stay"}-${index}`} className={cn("grid shrink-0 grid-cols-4 gap-4", motion ? "w-1/2" : "w-full")}>
+              {pageItems(index).map((item) => (
+                <li key={itemKey(item)}>{renderItem(item)}</li>
+              ))}
+            </ul>
+          ))}
+        </div>
+      </div>
       {pageCount > 1 ? (
-        <PageArrow direction="next" label={label} listId={listId} disabled={current === pageCount - 1} onClick={() => onPage(current + 1)} />
+        <PageArrow direction="next" label={label} listId={listId} disabled={moving || current === pageCount - 1} onClick={() => onPage(current + 1)} />
       ) : null}
     </div>
   )

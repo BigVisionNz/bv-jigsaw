@@ -1,6 +1,4 @@
 ---
-import { CategoryPuzzles } from "@/components/CategoryPuzzles"
-import Base from "@/layouts/Base.astro"
 import { loadPuzzleGroups } from "@/lib/catalog"
 
 export const prerender = true
@@ -8,15 +6,24 @@ export const prerender = true
 export function getStaticPaths() {
   return loadPuzzleGroups().map((group) => ({
     params: { id: group.id },
-    props: { group },
   }))
 }
 
-const { group } = Astro.props
+const id = Astro.params.id
 ---
 
-<Base title={`${group.title} · BV Jigsaw`}>
-  <main class="min-h-0 flex-1 overflow-y-auto">
-    <CategoryPuzzles client:load group={group} />
-  </main>
-</Base>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Redirecting</title>
+    <link rel="canonical" href={`/collection/${id}`} />
+    <meta http-equiv="refresh" content={`0;url=/collection/${id}`} />
+    <script is:inline define:vars={{ id }}>
+      location.replace(`/collection/${id}`)
+    </script>
+  </head>
+  <body>
+    <a href={`/collection/${id}`}>Continue to the collection</a>
+  </body>
+</html>

@@ -44,7 +44,7 @@ export function PieceCount({
         )
         if (href) {
           return (
-            <a key={count} href={href(count)} aria-label={label} className={className} onClick={start}>
+            <a key={count} href={href(count)} data-astro-reload aria-label={label} className={className} onClick={start}>
               {count}
               {badge}
             </a>

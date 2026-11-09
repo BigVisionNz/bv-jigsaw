@@ -2,14 +2,15 @@
 import { PuzzleGallery } from "@/components/PuzzleGallery"
 import Base from "@/layouts/Base.astro"
 import { loadPuzzleGroups } from "@/lib/catalog"
+import { gallerySlide } from "@/lib/page-slide"
 
 export const prerender = true
 
 const groups = loadPuzzleGroups()
 ---
 
-<Base title="BV Jigsaw">
-  <main class="min-h-0 flex-1 overflow-y-auto">
+<Base title="BV Jigsaw" slide>
+  <main transition:name="gallery" transition:animate={gallerySlide} class="min-h-0 flex-1 overflow-y-auto">
     <PuzzleGallery client:load groups={groups} />
   </main>
 </Base>

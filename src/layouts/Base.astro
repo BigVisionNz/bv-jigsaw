@@ -1,23 +1,27 @@
 ---
 import "@/styles/global.css"
 
+import { ClientRouter } from "astro:transitions"
+
 import { SiteHeader } from "@/components/SiteHeader"
 
 interface Props {
   title: string
   picture?: boolean
+  slide?: boolean
 }
 
-const { title, picture = false } = Astro.props
+const { title, picture = false, slide = false } = Astro.props
 ---
 
-<html lang="en" class="dark">
+<html lang="en" class="dark" transition:animate={slide ? "none" : undefined}>
   <head>
     <meta charset="utf-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width" />
     <meta name="generator" content={Astro.generator} />
     <title>{title}</title>
+    {slide ? <ClientRouter fallback="none" /> : null}
     <script is:inline>
       try {
         if (localStorage.getItem("bv-jigsaw-theme") === "light") {
@@ -27,7 +31,13 @@ const { title, picture = false } = Astro.props
     </script>
   </head>
   <body class="flex h-dvh flex-col overflow-hidden">
-    <SiteHeader client:load picture={picture} />
+    {slide ? (
+      <div transition:persist="site-header">
+        <SiteHeader client:load picture={picture} />
+      </div>
+    ) : (
+      <SiteHeader client:load picture={picture} />
+    )}
     <slot />
   </body>
 </html>
