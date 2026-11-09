@@ -161,19 +161,19 @@ function nearestFree(slot: TraySlot, others: TraySlot[], cols: number): Cell {
   return { col: Math.max(0, slot.col), row: Math.max(0, slot.row) }
 }
 
-export function placeTrayGroup(ids: number[], desired: Cell, existing: TraySlot[], cols: number): TraySlot[] {
+export function placeTrayGroup(ids: number[], desired: Cell, existing: TraySlot[], cols: number, onto: number[] = []): TraySlot[] {
   const others = releaseSlots(existing, ids, cols)
   let moving: TraySlot = { pieceIds: [...ids], col: Math.max(0, desired.col), row: Math.max(0, desired.row) }
+  const landed = new Set(onto)
 
   let best: { dist: number; anchor: Cell } | null = null
-  for (let index = 0; index < others.length; index += 1) {
-    const other = others[index]
+  for (const other of others) {
     const aligned = alignedAnchor(moving.pieceIds, other, cols)
-    if (!aligned || aligned.col < 0 || aligned.row < 0) continue
+    if (!aligned) continue
+    const onPiece = other.pieceIds.some((id) => landed.has(id)) || overlaps(moving, [other], cols)
     const dist = Math.max(Math.abs(aligned.col - moving.col), Math.abs(aligned.row - moving.row))
-    if (dist > 1 || (best && dist >= best.dist)) continue
-    const rest = others.filter((_, otherIndex) => otherIndex !== index)
-    if (overlaps(combineSlots({ ...moving, col: aligned.col, row: aligned.row }, other, cols), rest, cols)) continue
+    if (!onPiece && dist > 1) continue
+    if (best && dist >= best.dist) continue
     best = { dist, anchor: aligned }
   }
   if (best) moving = { ...moving, col: best.anchor.col, row: best.anchor.row }
@@ -183,20 +183,59 @@ export function placeTrayGroup(ids: number[], desired: Cell, existing: TraySlot[
     guard += 1
     const index = others.findIndex((other) => {
       const aligned = alignedAnchor(moving.pieceIds, other, cols)
-      if (!aligned || aligned.col !== moving.col || aligned.row !== moving.row) return false
-      const rest = others.filter((slot) => slot !== other)
-      return !overlaps(combineSlots(moving, other, cols), rest, cols)
+      return aligned != null && aligned.col === moving.col && aligned.row === moving.row
     })
     if (index < 0) break
     const [other] = others.splice(index, 1)
     moving = combineSlots(moving, other, cols)
   }
 
+  moving = { ...moving, col: Math.max(0, moving.col), row: Math.max(0, moving.row) }
+
   if (overlaps(moving, others, cols)) {
     const free = nearestFree(moving, others, cols)
     moving = { ...moving, col: free.col, row: free.row }
   }
   return [...others, moving]
+}
+
+function covers(slot: TraySlot, cell: Cell, cols: number) {
+  const box = bounds(slot.pieceIds, cols)
+  const spanW = box.maxCol - box.minCol + 1
+  const spanH = box.maxRow - box.minRow + 1
+  return cell.col >= slot.col && cell.col < slot.col + spanW && cell.row >= slot.row && cell.row < slot.row + spanH
+}
+
+function unite(a: number[], b: number[], cols: number) {
+  return combineSlots({ pieceIds: a, col: 0, row: 0 }, { pieceIds: b, col: 0, row: 0 }, cols).pieceIds
+}
+
+export function reflowTray(movingIds: number[], at: Cell, existing: TraySlot[], columns: number, cols: number, onto: number[] = []) {
+  const ordered = releaseSlots(existing, movingIds, cols).sort((a, b) => a.row - b.row || a.col - b.col)
+  const landed = new Set(onto)
+  const keep: TraySlot[] = []
+  let group = [...movingIds]
+  let insertAt: number | null = null
+  for (const slot of ordered) {
+    const hit = slot.pieceIds.some((id) => landed.has(id))
+    if (hit && alignedAnchor(group, slot, cols)) {
+      if (insertAt == null) insertAt = keep.length
+      group = unite(group, slot.pieceIds, cols)
+      continue
+    }
+    keep.push(slot)
+  }
+  if (insertAt == null) {
+    const containing = keep.findIndex((slot) => covers(slot, at, cols))
+    if (containing >= 0) insertAt = containing
+    else {
+      const later = keep.findIndex((slot) => slot.row > at.row || (slot.row === at.row && slot.col >= at.col))
+      insertAt = later < 0 ? keep.length : later
+    }
+  }
+  const groups = keep.map((slot) => slot.pieceIds)
+  groups.splice(insertAt, 0, group)
+  return { slots: packTraySlots(groups, columns, cols), pieceIds: group }
 }
 
 export function resolveTraySlots(groups: number[][], stored: TraySlot[] | null, columns: number, cols: number): TraySlot[] {

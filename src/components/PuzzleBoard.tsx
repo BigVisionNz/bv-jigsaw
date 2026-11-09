@@ -17,7 +17,7 @@ import { bindPuzzleColours } from "@/lib/puzzle-colours"
 import { setPuzzleSolved } from "@/lib/puzzle-solved"
 import { isPieceCount, PIECE_COUNTS, puzzleGrid, type PieceCount as PieceCountValue, type Puzzle } from "@/lib/puzzles"
 import { loadGame, saveGame, type TraySlot } from "@/lib/save"
-import { placeTrayGroup, releaseSlots, resolveTraySlots, trayGroups } from "@/lib/tray-grid"
+import { packTraySlots, reflowTray, releaseSlots, resolveTraySlots, trayGroups } from "@/lib/tray-grid"
 import { cn } from "cn"
 
 type PlayablePuzzle = Puzzle & { group: string }
@@ -460,7 +460,12 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
 
   function takeFromTray(ids: number[]) {
     if (!traySlotsRef.current) return
-    const next = releaseSlots(traySlotsRef.current, ids, cols)
+    const released = releaseSlots(traySlotsRef.current, ids, cols).sort((a, b) => a.row - b.row || a.col - b.col)
+    const next = packTraySlots(
+      released.map((slot) => slot.pieceIds),
+      poolMetrics.current.packCols,
+      cols,
+    )
     traySlotsRef.current = next
     setTraySlots(next)
   }
@@ -489,15 +494,17 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
     const metrics = poolMetrics.current
     const loose = orderRef.current.filter((id) => !placedRef.current[id] && homeRef.current[id] === "tray")
     const base = resolveTraySlots(trayGroups(loose, clustersRef.current), traySlotsRef.current, metrics.packCols, cols)
-    const nextSlots = placeTrayGroup(ids, trayAnchor(drag, point), base, cols)
-    const joined = nextSlots.find((slot) => ids.some((id) => slot.pieceIds.includes(id)))?.pieceIds ?? ids
+    const flow = reflowTray(ids, trayAnchor(drag, point), base, metrics.packCols, cols, piecesUnderDrop(drag, point))
+    const nextSlots = flow.slots
+    const joined = flow.pieceIds
     traySlotsRef.current = nextSlots
     setTraySlots(nextSlots)
     setHome((values) => values.map((bin, index) => (joined.includes(index) ? "tray" : bin)))
     setOrder((current) => {
-      const rest = current.filter((id) => !ids.includes(id))
-      const index = rest.findLastIndex((id) => homeRef.current[id] === "tray" && !placedRef.current[id]) + 1
-      rest.splice(index < 0 ? rest.length : index, 0, ...ids)
+      const sequence = [...nextSlots].sort((a, b) => a.row - b.row || a.col - b.col).flatMap((slot) => slot.pieceIds)
+      const sequenceSet = new Set(sequence)
+      const rest = current.filter((id) => !sequenceSet.has(id))
+      rest.push(...sequence)
       return rest
     })
     setClusters((current) => {
@@ -560,6 +567,31 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
       return together.length ? together : [id]
     }
     return [id]
+  }
+
+  function piecesUnderDrop(drag: Drag, point: { x: number; y: number }) {
+    const found = new Set<number>()
+    const direct = pieceUnderPointer(point, "tray", drag.pieceIds)
+    if (direct != null) found.add(direct)
+    const metrics = poolMetrics.current
+    const box = bounds(drag.pieceIds, cols)
+    const grabbed = pieceFromId(drag.pieceId, cols)
+    const left = point.x - (grabbed.col - box.minCol) * metrics.width - metrics.width / 2
+    const top = point.y - (grabbed.row - box.minRow) * metrics.height - metrics.height / 2
+    const right = left + (box.maxCol - box.minCol + 1) * metrics.width
+    const bottom = top + (box.maxRow - box.minRow + 1) * metrics.height
+    const tray = trayRef.current
+    if (!tray) return [...found]
+    for (const node of tray.querySelectorAll("[data-piece-id]")) {
+      const id = Number(node.getAttribute("data-piece-id"))
+      if (drag.pieceIds.includes(id) || found.has(id) || homeRef.current[id] !== "tray" || placedRef.current[id]) continue
+      const rect = node.getBoundingClientRect()
+      const hits = rect.right > left && rect.left < right && rect.bottom > top && rect.top < bottom
+      if (!hits) continue
+      const target = pieceFromId(id, cols)
+      if (drag.pieceIds.some((moving) => sharesEdge(pieceFromId(moving, cols), target))) found.add(id)
+    }
+    return [...found]
   }
 
   function pieceUnderPointer(point: { x: number; y: number }, bin: Bin, moving: number[]) {
@@ -1258,12 +1290,12 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
         aria-label="Loose pieces"
       >
         <div className={cn("flex h-8 shrink-0 items-center justify-between gap-2", paneHeaderFade)}>
-          <ControlTip label="Drag a piece onto a grid cell, the board, a tray, or a neighbouring piece to join them." side="top">
+          <ControlTip label="Drag a piece to a grid cell. Pieces after that cell shift along. Drop it on a neighbour to join them." side="top">
             <h2 className="flex h-8 w-fit shrink-0 items-center text-sm font-medium">Pieces</h2>
           </ControlTip>
           <PaneSizeButton active={maximized === "pieces"} label="pieces" onClick={() => togglePane("pieces")} />
         </div>
-        <ControlTip label="Drag a piece onto a grid cell, the board, a tray, or a neighbouring piece to join them." side="top" disabled={drag != null}>
+        <ControlTip label="Drag a piece to a grid cell. Pieces after that cell shift along. Drop it on a neighbour to join them." side="top" disabled={drag != null}>
         <div
           ref={trayRef}
           className="min-h-0 flex-1 overflow-auto overscroll-contain rounded-xl bg-card p-3 ring-1 ring-foreground/10 [scrollbar-gutter:stable] [overflow-anchor:none]"
