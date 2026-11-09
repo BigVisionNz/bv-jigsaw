@@ -210,7 +210,15 @@ function unite(a: number[], b: number[], cols: number) {
   return combineSlots({ pieceIds: a, col: 0, row: 0 }, { pieceIds: b, col: 0, row: 0 }, cols).pieceIds
 }
 
-export function reflowTray(movingIds: number[], at: Cell, existing: TraySlot[], columns: number, cols: number, onto: number[] = []) {
+export function reflowTray(
+  movingIds: number[],
+  at: Cell,
+  existing: TraySlot[],
+  columns: number,
+  cols: number,
+  onto: number[] = [],
+  beforeId: number | null = null,
+) {
   const ordered = releaseSlots(existing, movingIds, cols).sort((a, b) => a.row - b.row || a.col - b.col)
   const landed = new Set(onto)
   const keep: TraySlot[] = []
@@ -225,6 +233,10 @@ export function reflowTray(movingIds: number[], at: Cell, existing: TraySlot[], 
     }
     keep.push(slot)
   }
+  if (insertAt == null && beforeId != null) {
+    const index = keep.findIndex((slot) => slot.pieceIds.includes(beforeId))
+    if (index >= 0) insertAt = index
+  }
   if (insertAt == null) {
     const containing = keep.findIndex((slot) => covers(slot, at, cols))
     if (containing >= 0) insertAt = containing
@@ -234,8 +246,9 @@ export function reflowTray(movingIds: number[], at: Cell, existing: TraySlot[], 
     }
   }
   const groups = keep.map((slot) => slot.pieceIds)
-  groups.splice(insertAt, 0, group)
-  return { slots: packTraySlots(groups, columns, cols), pieceIds: group }
+  const before = groups.slice(0, insertAt)
+  const after = groups.slice(insertAt)
+  return { slots: packTraySlots([group, ...after, ...before], columns, cols), pieceIds: group }
 }
 
 export function resolveTraySlots(groups: number[][], stored: TraySlot[] | null, columns: number, cols: number): TraySlot[] {

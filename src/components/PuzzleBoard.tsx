@@ -494,7 +494,15 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
     const metrics = poolMetrics.current
     const loose = orderRef.current.filter((id) => !placedRef.current[id] && homeRef.current[id] === "tray")
     const base = resolveTraySlots(trayGroups(loose, clustersRef.current), traySlotsRef.current, metrics.packCols, cols)
-    const flow = reflowTray(ids, trayAnchor(drag, point), base, metrics.packCols, cols, piecesUnderDrop(drag, point))
+    const flow = reflowTray(
+      ids,
+      trayAnchor(drag, point),
+      base,
+      metrics.packCols,
+      cols,
+      piecesUnderDrop(drag, point),
+      pieceUnderPointer(point, "tray", ids),
+    )
     const nextSlots = flow.slots
     const joined = flow.pieceIds
     traySlotsRef.current = nextSlots
@@ -1290,12 +1298,12 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
         aria-label="Loose pieces"
       >
         <div className={cn("flex h-8 shrink-0 items-center justify-between gap-2", paneHeaderFade)}>
-          <ControlTip label="Drag a piece to a grid cell. Pieces after that cell shift along. Drop it on a neighbour to join them." side="top">
+          <ControlTip label="Drag a piece to a grid cell. Pieces before that cell move behind it, and the pieces there follow. Drop it on a neighbour to join them." side="top">
             <h2 className="flex h-8 w-fit shrink-0 items-center text-sm font-medium">Pieces</h2>
           </ControlTip>
           <PaneSizeButton active={maximized === "pieces"} label="pieces" onClick={() => togglePane("pieces")} />
         </div>
-        <ControlTip label="Drag a piece to a grid cell. Pieces after that cell shift along. Drop it on a neighbour to join them." side="top" disabled={drag != null}>
+        <ControlTip label="Drag a piece to a grid cell. Pieces before that cell move behind it, and the pieces there follow. Drop it on a neighbour to join them." side="top" disabled={drag != null}>
         <div
           ref={trayRef}
           className="min-h-0 flex-1 overflow-auto overscroll-contain rounded-xl bg-card p-3 ring-1 ring-foreground/10 [scrollbar-gutter:stable] [overflow-anchor:none]"
