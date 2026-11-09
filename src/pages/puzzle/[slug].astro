@@ -3,6 +3,8 @@ import { PuzzleBoard } from "@/components/PuzzleBoard"
 import Base from "@/layouts/Base.astro"
 import { loadPuzzle, loadPuzzles } from "@/lib/catalog"
 
+export const prerender = true
+
 export function getStaticPaths() {
   return loadPuzzles().map((puzzle) => ({ params: { slug: puzzle.slug } }))
 }

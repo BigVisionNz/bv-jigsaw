@@ -1,0 +1,37 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "bv-jigsaw",
+  "main": "@astrojs/cloudflare/entrypoints/server",
+  // First publish is https://bv-jigsaw.big-vision.workers.dev (account subdomain: big-vision).
+  "compatibility_date": "2026-11-09",
+  "compatibility_flags": ["global_fetch_strictly_public"],
+  "assets": {
+    "binding": "ASSETS",
+    // Astro writes the site and public/puzzles into dist/client. The build
+    // also emits .wrangler/deploy/config.json, which points Wrangler at the
+    // generated config under dist/ and rebases this directory onto dist/client
+    // rather than the whole dist/ tree.
+    "directory": "./dist/client"
+  },
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 1
+    }
+  }
+  // Leave the custom hostname commented out. Uncommenting it makes
+  // `wrangler deploy` create or replace DNS for jigsaw.bigvision.co.nz.
+  // Attach that hostname later with the Workers custom domains API, after
+  // https://bv-jigsaw.big-vision.workers.dev is up.
+  // "routes": [
+  //   {
+  //     "pattern": "jigsaw.bigvision.co.nz",
+  //     "custom_domain": true
+  //   }
+  // ]
+}
