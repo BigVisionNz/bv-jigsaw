@@ -108,8 +108,8 @@ export function PuzzleGallery({ groups }: { groups: PuzzleGroup[] }) {
         <h1 className="text-4xl font-semibold tracking-tight">Choose a puzzle</h1>
         <p className="text-base text-muted-foreground">Choose 100, 200, 400, or 800 pieces, then solve the puzzle.</p>
       </header>
-      {favourites.length > 0 ? <Favourites puzzles={favourites} played={played} /> : null}
       <PlayedGrid games={played} />
+      {favourites.length > 0 ? <Favourites puzzles={favourites} played={played} /> : null}
       <div className="flex flex-col gap-8">
         <div role="tablist" aria-label="Image categories" className="flex flex-wrap gap-2">
           {TABS.map((item) => (
@@ -327,9 +327,9 @@ function PlayedGrid({ games }: { games: PlayedCardGame[] }) {
     <section aria-labelledby="played" className="flex flex-col gap-5">
       <SectionHeader
         id="played"
-        title="Last Played"
+        title="Recently Played"
         description="Puzzles you have started, newest first."
-        label="Last Played"
+        label="Recently Played"
         count={games.length}
         page={page}
         onPage={setPage}
@@ -343,7 +343,7 @@ function PlayedGrid({ games }: { games: PlayedCardGame[] }) {
         <p className="text-sm text-muted-foreground">No puzzles played yet.</p>
       ) : (
         <PagedImages
-          label="Last Played"
+          label="Recently Played"
           listId="played-page"
           items={games}
           page={page}

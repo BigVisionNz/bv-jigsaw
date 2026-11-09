@@ -158,6 +158,7 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
   const boardRef = useRef<HTMLDivElement>(null)
   const boardPaneRef = useRef<HTMLDivElement>(null)
   const boardScrollRef = useRef<HTMLDivElement>(null)
+  const boardPanRef = useRef<{ pointerId: number; x: number; y: number; left: number; top: number } | null>(null)
   const poolCanvasRef = useRef<HTMLDivElement>(null)
   const trayRef = useRef<HTMLDivElement>(null)
   const matRef = useRef<HTMLDivElement>(null)
@@ -306,6 +307,36 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
   function updateDrag(next: Drag | null) {
     dragRef.current = next
     setDrag(next)
+  }
+
+  function onBoardPanStart(event: PointerEvent<HTMLDivElement>) {
+    if (event.button !== 0 || boardZoomRef.current <= 1 || dragRef.current) return
+    const node = boardScrollRef.current
+    if (!node) return
+    event.preventDefault()
+    boardPanRef.current = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      left: node.scrollLeft,
+      top: node.scrollTop,
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  function onBoardPanMove(event: PointerEvent<HTMLDivElement>) {
+    const pan = boardPanRef.current
+    const node = boardScrollRef.current
+    if (!pan || !node || event.pointerId !== pan.pointerId) return
+    node.scrollLeft = pan.left - (event.clientX - pan.x)
+    node.scrollTop = pan.top - (event.clientY - pan.y)
+  }
+
+  function onBoardPanEnd(event: PointerEvent<HTMLDivElement>) {
+    const pan = boardPanRef.current
+    if (!pan || event.pointerId !== pan.pointerId) return
+    boardPanRef.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
   }
 
   function onPointerDown(event: PointerEvent<HTMLButtonElement>, id: number) {
@@ -1117,13 +1148,20 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
           >
             <div className="relative" style={{ width: boardCanvasWidth || "100%", height: boardCanvasHeight || "100%" }}>
               <div
-                className="absolute overflow-hidden rounded-xl ring-1 ring-foreground/10"
+                className={cn(
+                  "absolute overflow-hidden rounded-xl ring-1 ring-foreground/10",
+                  boardZoom > 1 && "cursor-grab touch-none active:cursor-grabbing",
+                )}
                 style={{
                   width: boardWidth || "100%",
                   height: boardHeight || "100%",
                   left: boardWidth ? boardLeft : 0,
                   top: boardHeight ? boardTop : 0,
                 }}
+                onPointerDown={onBoardPanStart}
+                onPointerMove={onBoardPanMove}
+                onPointerUp={onBoardPanEnd}
+                onPointerCancel={onBoardPanEnd}
               >
             <div
               ref={boardRef}
