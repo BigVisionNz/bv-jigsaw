@@ -458,7 +458,10 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
     const metrics = poolMetrics.current
     const loose = orderRef.current.filter((id) => !placedRef.current[id] && homeRef.current[id] === "tray")
     const base = resolveTraySlots(trayGroups(loose, clustersRef.current), traySlotsRef.current, metrics.packCols, cols)
-    const nextSlots = placeTrayGroup(ids, trayAnchor(drag, point), base, cols)
+    const under = pieceUnderPointer(point, "tray", ids)
+    const magnet =
+      under != null && ids.some((moving) => sharesEdge(pieceFromId(moving, cols), pieceFromId(under, cols))) ? under : null
+    const nextSlots = placeTrayGroup(ids, trayAnchor(drag, point), base, cols, magnet)
     const joined = nextSlots.find((slot) => ids.some((id) => slot.pieceIds.includes(id)))?.pieceIds ?? ids
     traySlotsRef.current = nextSlots
     setTraySlots(nextSlots)
