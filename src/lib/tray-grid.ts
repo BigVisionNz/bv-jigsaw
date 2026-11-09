@@ -103,6 +103,11 @@ function overlaps(slot: TraySlot, others: TraySlot[], cols: number) {
   return cellsOf(slot, cols).some((cell) => cell.col < 0 || cell.row < 0 || taken.has(`${cell.col},${cell.row}`))
 }
 
+function collides(slot: TraySlot, others: TraySlot[], cols: number) {
+  const taken = occupied(others, cols)
+  return cellsOf(slot, cols).some((cell) => taken.has(`${cell.col},${cell.row}`))
+}
+
 function alignedAnchor(movingIds: number[], other: TraySlot, cols: number): Cell | null {
   const moving = bounds(movingIds, cols)
   const parked = bounds(other.pieceIds, cols)
@@ -161,42 +166,83 @@ function nearestFree(slot: TraySlot, others: TraySlot[], cols: number): Cell {
   return { col: Math.max(0, slot.col), row: Math.max(0, slot.row) }
 }
 
-export function placeTrayGroup(ids: number[], desired: Cell, existing: TraySlot[], cols: number): TraySlot[] {
-  const others = releaseSlots(existing, ids, cols)
+const SNAP_CELLS = 1
+
+function shiftSlots(slots: TraySlot[], col: number, row: number) {
+  if (!col && !row) return slots
+  return slots.map((slot) => ({ ...slot, col: slot.col + col, row: slot.row + row }))
+}
+
+function normalizeSlots(slots: TraySlot[]) {
+  let minCol = 0
+  let minRow = 0
+  for (const slot of slots) {
+    if (slot.col < minCol) minCol = slot.col
+    if (slot.row < minRow) minRow = slot.row
+  }
+  return shiftSlots(slots, minCol < 0 ? -minCol : 0, minRow < 0 ? -minRow : 0)
+}
+
+function settleAround(anchor: TraySlot, others: TraySlot[], cols: number) {
+  const placed: TraySlot[] = [anchor]
+  const settled: TraySlot[] = []
+  for (const other of others) {
+    const spot = nearestFree(other, placed, cols)
+    const next = { ...other, col: spot.col, row: spot.row }
+    settled.push(next)
+    placed.push(next)
+  }
+  return normalizeSlots([...settled, anchor])
+}
+
+export function placeTrayGroup(ids: number[], desired: Cell, existing: TraySlot[], cols: number, magnetId?: number | null): TraySlot[] {
+  let others = releaseSlots(existing, ids, cols)
   let moving: TraySlot = { pieceIds: [...ids], col: Math.max(0, desired.col), row: Math.max(0, desired.row) }
 
-  let best: { dist: number; anchor: Cell } | null = null
-  for (let index = 0; index < others.length; index += 1) {
-    const other = others[index]
+  let best: { aligned: Cell; dist: number; forced: boolean } | null = null
+  for (const other of others) {
     const aligned = alignedAnchor(moving.pieceIds, other, cols)
-    if (!aligned || aligned.col < 0 || aligned.row < 0) continue
+    if (!aligned) continue
     const dist = Math.max(Math.abs(aligned.col - moving.col), Math.abs(aligned.row - moving.row))
-    if (dist > 1 || (best && dist >= best.dist)) continue
-    const rest = others.filter((_, otherIndex) => otherIndex !== index)
-    if (overlaps(combineSlots({ ...moving, col: aligned.col, row: aligned.row }, other, cols), rest, cols)) continue
-    best = { dist, anchor: aligned }
+    const forced = magnetId != null && other.pieceIds.includes(magnetId)
+    if (!forced && dist > SNAP_CELLS) continue
+    const rest = others.filter((slot) => slot !== other)
+    const joined = combineSlots({ ...moving, col: aligned.col, row: aligned.row }, other, cols)
+    if (!forced && collides(joined, rest, cols)) continue
+    if (!best || (forced && !best.forced) || (forced === best.forced && dist < best.dist)) best = { aligned, dist, forced }
   }
-  if (best) moving = { ...moving, col: best.anchor.col, row: best.anchor.row }
+
+  if (best) {
+    const shiftCol = best.aligned.col < 0 ? -best.aligned.col : 0
+    const shiftRow = best.aligned.row < 0 ? -best.aligned.row : 0
+    if (shiftCol || shiftRow) {
+      others = shiftSlots(others, shiftCol, shiftRow)
+      moving = { ...moving, col: moving.col + shiftCol, row: moving.row + shiftRow }
+      best = { ...best, aligned: { col: best.aligned.col + shiftCol, row: best.aligned.row + shiftRow } }
+    }
+    moving = { ...moving, col: best.aligned.col, row: best.aligned.row }
+  }
 
   let guard = 0
   while (guard < others.length + 1) {
     guard += 1
     const index = others.findIndex((other) => {
       const aligned = alignedAnchor(moving.pieceIds, other, cols)
-      if (!aligned || aligned.col !== moving.col || aligned.row !== moving.row) return false
-      const rest = others.filter((slot) => slot !== other)
-      return !overlaps(combineSlots(moving, other, cols), rest, cols)
+      return aligned != null && aligned.col === moving.col && aligned.row === moving.row
     })
     if (index < 0) break
     const [other] = others.splice(index, 1)
     moving = combineSlots(moving, other, cols)
   }
 
-  if (overlaps(moving, others, cols)) {
-    const free = nearestFree(moving, others, cols)
-    moving = { ...moving, col: free.col, row: free.row }
+  if (moving.pieceIds.length === ids.length) {
+    if (overlaps(moving, others, cols)) {
+      const free = nearestFree(moving, others, cols)
+      moving = { ...moving, col: free.col, row: free.row }
+    }
+    return [...others, moving]
   }
-  return [...others, moving]
+  return settleAround(moving, others, cols)
 }
 
 export function resolveTraySlots(groups: number[][], stored: TraySlot[] | null, columns: number, cols: number): TraySlot[] {
