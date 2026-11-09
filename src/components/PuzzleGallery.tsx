@@ -1,14 +1,16 @@
 import { ChevronLeft, ChevronRight, Upload } from "lucide-react"
 import { useEffect, useLayoutEffect, useState, useSyncExternalStore, type ReactNode } from "react"
 
-import { PieceCount } from "@/components/PieceCount"
+import { PIECE_MEDAL, PieceCount } from "@/components/PieceCount"
 import { ProgressCover } from "@/components/ProgressCover"
 import { buttonVariants } from "@/components/ui/button"
 import { Card, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { Progress } from "@/components/ui/progress"
 import { ControlTip, TooltipProvider } from "@/components/ui/tooltip"
 import { completionCounts } from "@/lib/completions"
 import { getFavourites, getServerFavourites, loadFavourites, subscribeFavourites, toggleFavourite } from "@/lib/favourites"
 import { addLibraryFiles, listLibrary, puzzleHref, removeLibraryImage, resolvePlayedGames } from "@/lib/library"
+import { setEdgeStyleFor } from "@/lib/edge-style"
 import { PIECE_COUNTS, type PieceCount as PieceCountValue, type Puzzle, type PuzzleGroup } from "@/lib/puzzles"
 import { type PlayedGame } from "@/lib/save"
 import { cn } from "cn"
@@ -366,9 +368,12 @@ function PlayedCard({ game }: { game: PlayedCardGame }) {
       </a>
       <CardHeader>
         <PuzzleName title={game.puzzle.title} slug={game.slug} />
-        <p className="text-sm text-muted-foreground">
-          <span className="font-medium text-foreground tabular-nums">{game.placed}</span> of {game.pieces} pieces
-        </p>
+        <div className="flex items-center gap-3">
+          <p className="min-w-0 text-sm text-muted-foreground">
+            <span className="font-medium text-foreground tabular-nums">{game.placed}</span> of {game.pieces} pieces
+          </p>
+          <Progress className="ml-auto w-24 shrink-0" value={(game.placed / game.pieces) * 100} aria-label={`${game.placed} of ${game.pieces} pieces`} />
+        </div>
       </CardHeader>
       <CardFooter>
         <a href={href} className={cn(buttonVariants(), "w-full")}>
@@ -393,8 +398,19 @@ export function PuzzleCard({ puzzle, played }: { puzzle: Puzzle; played: PlayedG
       </a>
       <CardHeader>
         <PuzzleName title={puzzle.title} slug={puzzle.slug} />
-        <CompletionBadges slug={puzzle.slug} played={played} />
-        <PieceCount value={pieces} onChange={setPieces} />
+        <div className="flex flex-col gap-1">
+          <p className="text-xs font-medium text-muted-foreground">Results</p>
+          <CompletionBadges slug={puzzle.slug} played={played} />
+        </div>
+        <div className="flex flex-col gap-1">
+          <p className="text-xs font-medium text-muted-foreground">Pick a size to start</p>
+          <PieceCount
+            value={pieces}
+            onChange={setPieces}
+            href={(count) => puzzleHref(puzzle.slug, count)}
+            onSelect={() => setEdgeStyleFor(puzzle.slug, "rectangular")}
+          />
+        </div>
       </CardHeader>
       <CardFooter>
         <a href={href} className={cn(buttonVariants(), "w-full")}>
@@ -432,7 +448,10 @@ function FavouriteButton({ title, slug }: { title: string; slug: string }) {
           className="group inline-flex size-7 shrink-0 items-center justify-center rounded-full text-foreground outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
           onClick={() => toggleFavourite(slug)}
         >
-          <FavouriteIcon filled={selected} className="size-5 transition-transform duration-150 group-hover:scale-110" />
+          <FavouriteIcon
+            filled={selected}
+            className={cn("size-5 transition-transform duration-150 group-hover:scale-110", selected ? "text-red-500" : "text-white")}
+          />
         </button>
       </ControlTip>
     </TooltipProvider>
@@ -474,8 +493,8 @@ function CompletionBadges({ slug, played }: { slug: string; played: PlayedGame[]
               {count}
               <span
                 className={cn(
-                  "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-semibold tabular-nums",
-                  times > 0 ? "bg-primary text-primary-foreground" : "bg-foreground/10 text-foreground",
+                  "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-semibold tabular-nums shadow-[inset_0_1px_0_rgba(255,255,255,0.45)]",
+                  PIECE_MEDAL[count],
                 )}
               >
                 {times}

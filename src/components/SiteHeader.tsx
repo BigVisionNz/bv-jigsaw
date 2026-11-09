@@ -21,6 +21,7 @@ import {
 import { getBoardSnap, getTraySnap, loadAutoSnap, setBoardSnap, setTraySnap, subscribeAutoSnap } from "@/lib/auto-snap"
 import { DEFAULT_BOARD_COLOUR, getBoardColour, setBoardColour, subscribeBoardColour } from "@/lib/board-colour"
 import { DEFAULT_GRID_COLOUR, getGridColour, setGridColour, subscribeGridColour } from "@/lib/grid-colour"
+import { EDGE_STYLES, EDGE_STYLE_LABELS, getEdgeStyle, setEdgeStyle, subscribeEdgeStyle, type EdgeStyle } from "@/lib/edge-style"
 import { getHintsOn, setHintsOn, subscribeHints } from "@/lib/hints"
 import { getPictureShown, setPictureShown, subscribePicture } from "@/lib/picture"
 import { getPuzzleSolved, subscribePuzzleSolved } from "@/lib/puzzle-solved"
@@ -56,6 +57,7 @@ export function SiteHeader({ picture = false }: { picture?: boolean }) {
               <PictureToggle />
               <HintsToggle />
               <EdgesToggle />
+              <ShapeMenu />
               <ColoursMenu />
               <AutoSnapMenu />
             </>
@@ -134,6 +136,31 @@ function EdgesToggle() {
         <SnapMark on={shown} />
         {shown ? "Edges On" : "Edges Off"}
       </button>
+    </ControlTip>
+  )
+}
+
+function ShapeMenu() {
+  const style = useSyncExternalStore(subscribeEdgeStyle, getEdgeStyle, () => "rectangular" as EdgeStyle)
+
+  return (
+    <ControlTip label="Choose the shape of the piece edges">
+      <span className="inline-flex">
+        <DropdownMenu>
+          <DropdownMenuTrigger className="inline-flex h-11 items-center gap-2 rounded-full border border-border bg-background px-4 text-sm font-medium outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50">
+            {EDGE_STYLE_LABELS[style]}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="center" className="w-44">
+            {EDGE_STYLES.map((value) => (
+              <DropdownMenuItem key={value} onClick={() => setEdgeStyle(value)}>
+                <Check className={value === style ? "size-4" : "size-4 opacity-0"} />
+                <EdgeStyleIcon style={value} />
+                {EDGE_STYLE_LABELS[value]}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </span>
     </ControlTip>
   )
 }
@@ -287,6 +314,21 @@ function AccountMenu() {
         </DropdownMenu>
       </span>
     </ControlTip>
+  )
+}
+
+const EDGE_STYLE_PATHS: Record<EdgeStyle, string> = {
+  rectangular: "M2 2v10h2V4h7v18h11V12h-2v8h-7V2z",
+  wavy: "M16.5 21c-3 0-4.19-4.24-5.45-8.72C10.14 9.04 9 5 7.5 5C4.11 5 4 11.93 4 12H2c0-.37.06-9 5.5-9c3 0 4.21 4.25 5.47 8.74C13.83 14.8 15 19 16.5 19c3.44 0 3.53-6.93 3.53-7h2c0 .37-.06 9-5.53 9",
+  jagged: "M11 22V6.83L2 16v-2.83L13 2v15.17L22 8v2.83z",
+  beads: "M12 2A10 10 0 0 0 2 12a10 10 0 0 0 10 10a10 10 0 0 0 10-10A10 10 0 0 0 12 2m0 2a8 8 0 0 1 8 8a8 8 0 0 1-8 8z",
+}
+
+function EdgeStyleIcon({ style }: { style: EdgeStyle }) {
+  return (
+    <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+      <path fill="currentColor" d={EDGE_STYLE_PATHS[style]} />
+    </svg>
   )
 }
 

@@ -7,6 +7,8 @@ import { ControlTip, TooltipProvider } from "@/components/ui/tooltip"
 import { completionCounts, completionStoreSnapshot, recordCompletion, subscribeCompletions } from "@/lib/completions"
 import { getBoardSnap, getTraySnap, loadAutoSnap, subscribeAutoSnap } from "@/lib/auto-snap"
 import { DEFAULT_EDGE_COLOUR, getEdgeColour, getEdgesShown, subscribeEdgeColour, subscribeEdgesShown } from "@/lib/edge-colour"
+import { getEdgeStyle, setEdgeStyle, subscribeEdgeStyle, type EdgeStyle } from "@/lib/edge-style"
+import { EDGE_PAD, pieceClipPath, seamMap, shapedBackground } from "@/lib/piece-contour"
 import { DEFAULT_BOARD_COLOUR, getBoardColour, subscribeBoardColour } from "@/lib/board-colour"
 import { DEFAULT_GRID_COLOUR, getGridColour, subscribeGridColour } from "@/lib/grid-colour"
 import { getHintsOn, subscribeHints } from "@/lib/hints"
@@ -14,7 +16,8 @@ import { getPictureShown, subscribePicture } from "@/lib/picture"
 import { bindPuzzleColours } from "@/lib/puzzle-colours"
 import { setPuzzleSolved } from "@/lib/puzzle-solved"
 import { isPieceCount, PIECE_COUNTS, puzzleGrid, type PieceCount as PieceCountValue, type Puzzle } from "@/lib/puzzles"
-import { loadGame, saveGame } from "@/lib/save"
+import { loadGame, saveGame, type TraySlot } from "@/lib/save"
+import { placeTrayGroup, releaseSlots, resolveTraySlots, trayGroups } from "@/lib/tray-grid"
 import { cn } from "cn"
 
 type PlayablePuzzle = Puzzle & { group: string }
@@ -40,6 +43,8 @@ type Drag = {
   clusterId: number | null
   x: number
   y: number
+  originX: number
+  originY: number
 }
 
 function ArrowLeftCircle({ className }: { className?: string }) {
@@ -92,6 +97,8 @@ const DRAWER_COUNT = 4
 const TILE = 56
 const PIECE_GAP = 8
 const SNAP = 40
+const ZOOM_MIN = 0.35
+const ZOOM_MAX = 5
 
 export function PuzzleBoard({ puzzle }: { puzzle: PlayablePuzzle }) {
   const [pieces, setPieces] = useState<PieceCountValue>(readPieceCount)
@@ -128,7 +135,17 @@ export function PuzzleBoard({ puzzle }: { puzzle: PlayablePuzzle }) {
           </ControlTip>
           <h1 className="truncate text-2xl font-semibold tracking-tight">{puzzle.title}</h1>
         </div>
-        <PieceCount value={pieces} onChange={setPieces} completed={completed} />
+        <PieceCount
+          value={pieces}
+          onChange={(count) => {
+            setEdgeStyle("rectangular")
+            const url = new URL(window.location.href)
+            url.searchParams.set("pieces", String(count))
+            window.history.replaceState(null, "", url)
+            setPieces(count)
+          }}
+          completed={completed}
+        />
       </div>
       <PuzzlePlay key={pieces} puzzle={puzzle} pieces={pieces} />
     </div>
@@ -139,6 +156,9 @@ export function PuzzleBoard({ puzzle }: { puzzle: PlayablePuzzle }) {
 function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number }) {
   const { cols, rows } = puzzleGrid(pieces)
   const boardRef = useRef<HTMLDivElement>(null)
+  const boardPaneRef = useRef<HTMLDivElement>(null)
+  const boardScrollRef = useRef<HTMLDivElement>(null)
+  const poolCanvasRef = useRef<HTMLDivElement>(null)
   const trayRef = useRef<HTMLDivElement>(null)
   const matRef = useRef<HTMLDivElement>(null)
   const connectRef = useRef<HTMLElement>(null)
@@ -155,9 +175,21 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
   const [maximized, setMaximized] = useState<Pane | null>(null)
   const layoutBefore = useRef<{ tray: number | null; pieces: number | null } | null>(null)
   const [trayBox, setTrayBox] = useState({ width: 0, height: 0 })
+  const [pieceZoom, setPieceZoom] = useState(1)
+  const [trayZoom, setTrayZoom] = useState(1)
+  const [boardZoom, setBoardZoom] = useState(1)
+  const pieceZoomRef = useRef(1)
+  const trayZoomRef = useRef(1)
+  const boardZoomRef = useRef(1)
+  const [boardPane, setBoardPane] = useState({ width: 0, height: 0 })
+  const boardGeom = useRef({ left: 0, top: 0, width: 0, height: 0, fittedWidth: 0, fittedHeight: 0, paneWidth: 0, paneHeight: 0 })
+  const zoomScroll = useRef<{ node: HTMLElement; left: number; top: number } | null>(null)
   const [drawerBoxes, setDrawerBoxes] = useState(() => Array.from({ length: DRAWER_COUNT }, () => ({ width: 0, height: 0 })))
   const [selectedDrawer, setSelectedDrawer] = useState(0)
   const [saved] = useState(() => loadGame(puzzle.slug, pieces))
+  const traySlotsRef = useRef<TraySlot[] | null>(saved && Array.isArray(saved.traySlots) ? saved.traySlots : null)
+  const [traySlots, setTraySlots] = useState<TraySlot[] | null>(() => traySlotsRef.current)
+  const poolMetrics = useRef({ width: TILE, height: TILE, gap: PIECE_GAP, packCols: 1, shaped: false })
   const restoredClusters = uniqueClusters(withoutPieces(saved?.clusters ?? [], placedIds(saved?.placed)))
   const homeRef = useRef<Bin[]>(saved?.home ?? Array.from({ length: pieces }, () => "tray"))
   const clustersRef = useRef<Cluster[]>(restoredClusters)
@@ -176,6 +208,8 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
   const hintsOn = useSyncExternalStore(subscribeHints, getHintsOn, () => false)
   const edgeColour = useSyncExternalStore(subscribeEdgeColour, getEdgeColour, () => DEFAULT_EDGE_COLOUR)
   const edgesShown = useSyncExternalStore(subscribeEdgesShown, getEdgesShown, () => true)
+  const edgeStyle = useSyncExternalStore(subscribeEdgeStyle, getEdgeStyle, () => "rectangular" as EdgeStyle)
+  const shaped = edgeStyle !== "rectangular"
   const gridColour = useSyncExternalStore(subscribeGridColour, getGridColour, () => DEFAULT_GRID_COLOUR)
   const boardColour = useSyncExternalStore(subscribeBoardColour, getBoardColour, () => DEFAULT_BOARD_COLOUR)
   const traySnap = useSyncExternalStore(subscribeAutoSnap, getTraySnap, () => true)
@@ -198,8 +232,9 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
       clusters,
       order,
       nextCluster: nextCluster.current,
+      traySlots: traySlots ?? undefined,
     })
-  }, [placed, home, clusters, order, puzzle.slug, pieces])
+  }, [placed, home, clusters, order, traySlots, puzzle.slug, pieces])
   useEffect(() => {
     return () => {
       saveGame(puzzle.slug, pieces, {
@@ -208,6 +243,7 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
         clusters: clustersRef.current,
         order: orderRef.current,
         nextCluster: nextCluster.current,
+        traySlots: traySlotsRef.current ?? undefined,
       })
     }
   }, [puzzle.slug, pieces])
@@ -225,20 +261,40 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
   clustersRef.current = clusters
   placedRef.current = placed
   orderRef.current = order
+  traySlotsRef.current = traySlots
 
   function pieceStyle(piece: Piece, width?: number, height?: number, rim = true): CSSProperties {
-    const edge = rim ? `3px solid ${edgeColour}` : undefined
+    const image = `url("${puzzle.image}")`
+    if (edgeStyle === "rectangular") {
+      const edge = rim ? `3px solid ${edgeColour}` : undefined
+      return {
+        width,
+        height,
+        boxSizing: "border-box",
+        backgroundImage: image,
+        backgroundSize: `${cols * 100}% ${rows * 100}%`,
+        backgroundPosition: position(piece.col, piece.row, cols, rows),
+        borderTop: rim && piece.row === 0 ? edge : undefined,
+        borderBottom: rim && piece.row === rows - 1 ? edge : undefined,
+        borderLeft: rim && piece.col === 0 ? edge : undefined,
+        borderRight: rim && piece.col === cols - 1 ? edge : undefined,
+      }
+    }
+    const picture = shapedBackground(piece.col, piece.row, cols, rows, width, height)
     return {
-      width,
-      height,
-      boxSizing: "border-box",
-      backgroundImage: `url("${puzzle.image}")`,
-      backgroundSize: `${cols * 100}% ${rows * 100}%`,
-      backgroundPosition: position(piece.col, piece.row, cols, rows),
-      borderTop: rim && piece.row === 0 ? edge : undefined,
-      borderBottom: rim && piece.row === rows - 1 ? edge : undefined,
-      borderLeft: rim && piece.col === 0 ? edge : undefined,
-      borderRight: rim && piece.col === cols - 1 ? edge : undefined,
+      ...(width == null || height == null
+        ? {
+            position: "absolute",
+            left: `${-EDGE_PAD * 100}%`,
+            top: `${-EDGE_PAD * 100}%`,
+            width: `${(1 + 2 * EDGE_PAD) * 100}%`,
+            height: `${(1 + 2 * EDGE_PAD) * 100}%`,
+            zIndex: 1,
+          }
+        : { width: width * (1 + 2 * EDGE_PAD), height: height * (1 + 2 * EDGE_PAD) }),
+      backgroundImage: image,
+      ...picture,
+      clipPath: `url(#cut-${piece.id})`,
     }
   }
 
@@ -272,6 +328,8 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
       clusterId: exact ? cluster.id : null,
       x: event.clientX,
       y: event.clientY,
+      originX: event.clientX,
+      originY: event.clientY,
     })
   }
 
@@ -314,7 +372,8 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
         else placeOnBoard(current, point, board)
       } else if (contains(matRef.current?.getBoundingClientRect(), point)) dropOnMat(current, point)
       else if (contains(trayRef.current?.getBoundingClientRect(), point)) {
-        placeInPool(current.pieceIds, pieceUnderPointer(point, "tray", current.pieceIds))
+        const travel = Math.hypot(point.x - current.originX, point.y - current.originY)
+        if (travel >= 4) placeInPool(current, point)
       }
       updateDrag(null)
     }
@@ -336,6 +395,7 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
     const grabbed = pieceFromId(current.pieceId, cols)
     const target = getBoardSnap() ? { col: grabbed.col, row: grabbed.row } : cell
     if (!dropFits(current.pieceIds, current.pieceId, target.col, target.row, cols, placedRef.current)) return false
+    takeFromTray(current.pieceIds)
     const nextPlaced = placedRef.current.map((value, index) => (current.pieceIds.includes(index) ? true : value))
     const nextClusters = withoutPieces(clustersRef.current, current.pieceIds)
     setPlaced(nextPlaced)
@@ -346,11 +406,13 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
       clusters: nextClusters,
       order: orderRef.current,
       nextCluster: nextCluster.current,
+      traySlots: traySlotsRef.current ?? undefined,
     })
     return true
   }
 
   function placeInDrawer(ids: number[], drawer: number, beforeId: number | null) {
+    takeFromTray(ids)
     setHome((values) => values.map((bin, index) => (ids.includes(index) ? drawer : bin)))
     setOrder((current) => {
       const rest = current.filter((id) => !ids.includes(id))
@@ -365,18 +427,53 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
     else joinTrayNeighbors(ids, drawer, beforeId)
   }
 
-  function placeInPool(ids: number[], beforeId: number | null) {
-    setHome((values) => values.map((bin, index) => (ids.includes(index) ? "tray" : bin)))
+  function takeFromTray(ids: number[]) {
+    if (!traySlotsRef.current) return
+    const next = releaseSlots(traySlotsRef.current, ids, cols)
+    traySlotsRef.current = next
+    setTraySlots(next)
+  }
+
+  function trayAnchor(drag: Drag, point: { x: number; y: number }) {
+    const canvas = poolCanvasRef.current
+    const metrics = poolMetrics.current
+    if (!canvas || metrics.width <= 0 || metrics.height <= 0) return { col: 0, row: 0 }
+    const rect = canvas.getBoundingClientRect()
+    const box = bounds(drag.pieceIds, cols)
+    const grabbed = pieceFromId(drag.pieceId, cols)
+    const padX = metrics.shaped ? EDGE_PAD * metrics.width : 0
+    const padY = metrics.shaped ? EDGE_PAD * metrics.height : 0
+    const innerX = (grabbed.col - box.minCol) * metrics.width
+    const innerY = (grabbed.row - box.minRow) * metrics.height
+    const strideX = metrics.width + metrics.gap
+    const strideY = metrics.height + metrics.gap
+    return {
+      col: Math.max(0, Math.floor((point.x - rect.left - innerX - padX - metrics.width / 2 + strideX / 2) / strideX)),
+      row: Math.max(0, Math.floor((point.y - rect.top - innerY - padY - metrics.height / 2 + strideY / 2) / strideY)),
+    }
+  }
+
+  function placeInPool(drag: Drag, point: { x: number; y: number }) {
+    const ids = drag.pieceIds
+    const metrics = poolMetrics.current
+    const loose = orderRef.current.filter((id) => !placedRef.current[id] && homeRef.current[id] === "tray")
+    const base = resolveTraySlots(trayGroups(loose, clustersRef.current), traySlotsRef.current, metrics.packCols, cols)
+    const nextSlots = placeTrayGroup(ids, trayAnchor(drag, point), base, cols)
+    const joined = nextSlots.find((slot) => ids.some((id) => slot.pieceIds.includes(id)))?.pieceIds ?? ids
+    traySlotsRef.current = nextSlots
+    setTraySlots(nextSlots)
+    setHome((values) => values.map((bin, index) => (joined.includes(index) ? "tray" : bin)))
     setOrder((current) => {
       const rest = current.filter((id) => !ids.includes(id))
-      const index =
-        beforeId != null && rest.includes(beforeId)
-          ? rest.indexOf(beforeId)
-          : rest.findLastIndex((id) => homeRef.current[id] === "tray" && !placedRef.current[id]) + 1
+      const index = rest.findLastIndex((id) => homeRef.current[id] === "tray" && !placedRef.current[id]) + 1
       rest.splice(index < 0 ? rest.length : index, 0, ...ids)
       return rest
     })
-    joinTrayNeighbors(ids, "tray", beforeId)
+    setClusters((current) => {
+      const cleared = withoutPieces(current, joined)
+      if (joined.length < 2) return cleared
+      return [...cleared, { id: nextCluster.current++, x: 0, y: 0, pieceIds: [...joined] }]
+    })
   }
 
   function joinTrayNeighbors(ids: number[], bin: Bin, beforeId: number | null) {
@@ -466,6 +563,7 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
   function dropOnMat(current: Drag, point: { x: number; y: number }) {
     const node = matRef.current
     if (!node) return
+    takeFromTray(current.pieceIds)
     const mat = node.getBoundingClientRect()
     const grabbed = pieceFromId(current.pieceId, cols)
     const box = bounds(current.pieceIds, cols)
@@ -481,6 +579,33 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
     setHome((values) => values.map((bin, index) => (current.pieceIds.includes(index) ? "mat" : bin)))
   }
 
+  function ShapeRim({ piece, show }: { piece: Piece; show: boolean }) {
+    if (!shaped || !show) return null
+    const inset = `${(EDGE_PAD / (1 + 2 * EDGE_PAD)) * 100}%`
+    const span = `${(1 / (1 + 2 * EDGE_PAD)) * 100}%`
+    const bar = (side: "top" | "right" | "bottom" | "left") => (
+      <span
+        key={side}
+        aria-hidden
+        className="pointer-events-none absolute"
+        style={{
+          backgroundColor: edgeColour,
+          ...(side === "top" || side === "bottom"
+            ? { [side]: inset, left: inset, width: span, height: 3 }
+            : { [side]: inset, top: inset, height: span, width: 3 }),
+        }}
+      />
+    )
+    return (
+      <>
+        {piece.row === 0 ? bar("top") : null}
+        {piece.row === rows - 1 ? bar("bottom") : null}
+        {piece.col === 0 ? bar("left") : null}
+        {piece.col === cols - 1 ? bar("right") : null}
+      </>
+    )
+  }
+
   function renderPiece(id: number, width: number, height: number) {
     const piece = pieceFromId(id, cols)
     return (
@@ -489,10 +614,12 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
         type="button"
         data-piece-id={id}
         aria-label={`Piece ${piece.col + 1}, ${piece.row + 1}`}
-        className="cursor-grab touch-none overflow-hidden rounded-md bg-muted ring-1 ring-foreground/15 active:cursor-grabbing"
+        className={cn(pieceClass(shaped), shaped && "relative")}
         style={pieceStyle(piece, width, height, poolRim(id))}
         onPointerDown={(event) => onPointerDown(event, id)}
-      />
+      >
+        <ShapeRim piece={piece} show={poolRim(id)} />
+      </button>
     )
   }
 
@@ -513,8 +640,47 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
     pieceIds,
   }))
   const cellAspect = ratio ? (ratio * rows) / cols : 1
-  const poolHeight = fitPieceGrid(trayBox.width, trayBox.height, Math.max(trayIds.length, 1), PIECE_GAP, cellAspect).size
+  const seams = useMemo(() => seamMap(puzzle.slug, cols, rows), [puzzle.slug, cols, rows])
+  const fitted = fitPieceGrid(trayBox.width, trayBox.height, Math.max(trayIds.length, 1), PIECE_GAP, cellAspect)
+  const poolHeight = (fitted.size * pieceZoom) / (shaped ? 1 + 2 * EDGE_PAD : 1)
   const poolWidth = poolHeight * cellAspect
+  poolMetrics.current = { width: poolWidth, height: poolHeight, gap: PIECE_GAP, packCols: fitted.cols, shaped }
+  const poolLayout = resolveTraySlots(
+    poolGroups.map((group) => group.pieceIds),
+    traySlots,
+    fitted.cols,
+    cols,
+  )
+  const poolStrideX = poolWidth + PIECE_GAP
+  const poolStrideY = poolHeight + PIECE_GAP
+  let gridCols = Math.max(fitted.cols, 1)
+  let gridRows = 1
+  for (const slot of poolLayout) {
+    const box = bounds(slot.pieceIds, cols)
+    gridCols = Math.max(gridCols, slot.col + (box.maxCol - box.minCol + 1) + 3)
+    gridRows = Math.max(gridRows, slot.row + (box.maxRow - box.minRow + 1) + 3)
+  }
+  if (poolStrideX > 0) gridCols = Math.max(gridCols, Math.ceil(trayBox.width / poolStrideX))
+  if (poolStrideY > 0) gridRows = Math.max(gridRows, Math.ceil(trayBox.height / poolStrideY))
+  const poolCanvasWidth = gridCols * poolStrideX
+  const poolCanvasHeight = gridRows * poolStrideY
+  const boardFit = fitBoard(boardPane.width, boardPane.height, ratio)
+  const boardWidth = boardFit.width * boardZoom
+  const boardHeight = boardFit.height * boardZoom
+  const boardCanvasWidth = Math.max(boardPane.width, boardWidth)
+  const boardCanvasHeight = Math.max(boardPane.height, boardHeight)
+  const boardLeft = (boardCanvasWidth - boardWidth) / 2
+  const boardTop = (boardCanvasHeight - boardHeight) / 2
+  boardGeom.current = {
+    left: boardLeft,
+    top: boardTop,
+    width: boardWidth,
+    height: boardHeight,
+    fittedWidth: boardFit.width,
+    fittedHeight: boardFit.height,
+    paneWidth: boardPane.width,
+    paneHeight: boardPane.height,
+  }
   const boardRect = boardRef.current?.getBoundingClientRect()
   const hoverDrawer = drag ? trayAtPoint(drag) : -1
   const wantsTrayChoice = drag != null && home[drag.pieceId] === "tray" && contains(connectRef.current?.getBoundingClientRect(), drag)
@@ -590,7 +756,8 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
     const box = drawerBoxes[drawer]
     if (!box || box.width <= 0 || box.height <= 0) return 48
     const fitted = fitPieceGrid(box.width, box.height, Math.max(count, 1), 4, cellAspect)
-    return Math.round(Math.max(32, Math.min(72, fitted.size)))
+    const item = Math.round(Math.max(32, Math.min(72, fitted.size)) * trayZoom)
+    return item / (shaped ? 1 + 2 * EDGE_PAD : 1)
   }
 
   function drawerGroups(drawer: number) {
@@ -603,17 +770,7 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
   }
 
   function manualTrayGroups(ids: number[]) {
-    const available = new Set(ids)
-    const used = new Set<number>()
-    const groups: number[][] = []
-    for (const id of ids) {
-      if (used.has(id)) continue
-      const cluster = clusters.find((item) => item.pieceIds.includes(id))
-      const pieceIds = (cluster ? cluster.pieceIds : [id]).filter((pieceId) => available.has(pieceId) && !used.has(pieceId))
-      pieceIds.forEach((pieceId) => used.add(pieceId))
-      if (pieceIds.length) groups.push(pieceIds)
-    }
-    return groups
+    return trayGroups(ids, clusters)
   }
 
   function renderDrawerGroup(pieceIds: number[], width: number, height: number, key: string) {
@@ -621,8 +778,10 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
     const box = bounds(pieceIds, cols)
     const spanW = box.maxCol - box.minCol + 1
     const spanH = box.maxRow - box.minRow + 1
+    const padX = shaped ? EDGE_PAD * width : 0
+    const padY = shaped ? EDGE_PAD * height : 0
     return (
-      <div key={key} className="relative shrink-0" style={{ width: spanW * width, height: spanH * height }}>
+      <div key={key} className="relative shrink-0" style={{ width: spanW * width + padX * 2, height: spanH * height + padY * 2 }}>
         {pieceIds.map((id) => {
           const piece = pieceFromId(id, cols)
           return (
@@ -631,15 +790,110 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
               type="button"
               data-piece-id={id}
               aria-label={`Piece ${piece.col + 1}, ${piece.row + 1}`}
-              className="absolute cursor-grab touch-none overflow-hidden rounded-md bg-muted ring-1 ring-foreground/15 active:cursor-grabbing"
+              className={cn("absolute", pieceClass(shaped))}
               style={{ ...pieceStyle(piece, width, height, edgesShown), left: (piece.col - box.minCol) * width, top: (piece.row - box.minRow) * height }}
               onPointerDown={(event) => onPointerDown(event, id)}
-            />
+            >
+              <ShapeRim piece={piece} show={edgesShown} />
+            </button>
           )
         })}
       </div>
     )
   }
+
+  useEffect(() => {
+    const nodes = [trayRef.current, ...drawerWellRefs.current].filter((node): node is HTMLDivElement => node != null)
+    const onWheel = (event: WheelEvent) => {
+      if (dragRef.current) return
+      const node = event.currentTarget
+      if (!(node instanceof HTMLElement)) return
+      event.preventDefault()
+      const piecesWell = node === trayRef.current
+      const current = piecesWell ? pieceZoomRef.current : trayZoomRef.current
+      const next = clampZoom(current * Math.exp(-wheelPixels(event) * 0.0016))
+      if (next === current) return
+      const applied = next / current
+      const rect = node.getBoundingClientRect()
+      const originX = event.clientX - rect.left
+      const originY = event.clientY - rect.top
+      const pending = zoomScroll.current
+      const scrollLeft = pending?.node === node ? pending.left : node.scrollLeft
+      const scrollTop = pending?.node === node ? pending.top : node.scrollTop
+      zoomScroll.current = {
+        node,
+        left: (scrollLeft + originX) * applied - originX,
+        top: (scrollTop + originY) * applied - originY,
+      }
+      if (piecesWell) {
+        pieceZoomRef.current = next
+        setPieceZoom(next)
+      } else {
+        trayZoomRef.current = next
+        setTrayZoom(next)
+      }
+    }
+    const boardNode = boardScrollRef.current
+    const onBoardWheel = (event: WheelEvent) => {
+      if (dragRef.current) return
+      const node = boardScrollRef.current
+      const geom = boardGeom.current
+      if (!node || geom.width <= 0 || geom.height <= 0) return
+      event.preventDefault()
+      const current = boardZoomRef.current
+      const next = clampZoom(current * Math.exp(-wheelPixels(event) * 0.0016))
+      if (next === current) return
+      const rect = node.getBoundingClientRect()
+      const originX = event.clientX - rect.left
+      const originY = event.clientY - rect.top
+      const pending = zoomScroll.current
+      const scrollLeft = pending?.node === node ? pending.left : node.scrollLeft
+      const scrollTop = pending?.node === node ? pending.top : node.scrollTop
+      const fractionX = (scrollLeft + originX - geom.left) / geom.width
+      const fractionY = (scrollTop + originY - geom.top) / geom.height
+      const nextWidth = geom.fittedWidth * next
+      const nextHeight = geom.fittedHeight * next
+      const nextCanvasW = Math.max(geom.paneWidth, nextWidth)
+      const nextCanvasH = Math.max(geom.paneHeight, nextHeight)
+      const nextLeft = (nextCanvasW - nextWidth) / 2
+      const nextTop = (nextCanvasH - nextHeight) / 2
+      zoomScroll.current = {
+        node,
+        left: nextLeft + fractionX * nextWidth - originX,
+        top: nextTop + fractionY * nextHeight - originY,
+      }
+      boardGeom.current = { ...geom, left: nextLeft, top: nextTop, width: nextWidth, height: nextHeight }
+      boardZoomRef.current = next
+      setBoardZoom(next)
+    }
+    nodes.forEach((node) => node.addEventListener("wheel", onWheel, { passive: false }))
+    boardNode?.addEventListener("wheel", onBoardWheel, { passive: false })
+    return () => {
+      nodes.forEach((node) => node.removeEventListener("wheel", onWheel))
+      boardNode?.removeEventListener("wheel", onBoardWheel)
+    }
+  }, [selectedDrawer, choosingTray])
+
+  useLayoutEffect(() => {
+    const pending = zoomScroll.current
+    if (!pending) return
+    pending.node.scrollLeft = pending.left
+    pending.node.scrollTop = pending.top
+    zoomScroll.current = null
+  }, [pieceZoom, trayZoom, boardZoom])
+
+  useLayoutEffect(() => {
+    const node = boardPaneRef.current
+    if (!node) return
+    const measure = () => {
+      const next = { width: node.clientWidth, height: node.clientHeight }
+      setBoardPane((current) => (current.width === next.width && current.height === next.height ? current : next))
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
 
   useEffect(() => {
     const node = trayRef.current
@@ -825,7 +1079,22 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
   }
 
   return (
-    <div className="flex min-h-0 flex-1 select-none flex-col gap-3">
+    <div className="relative flex min-h-0 flex-1 select-none flex-col gap-3">
+      {shaped ? (
+        <svg width="0" height="0" className="pointer-events-none absolute">
+          <defs>
+            {Array.from({ length: pieces }, (_, id) => {
+              const piece = pieceFromId(id, cols)
+              const path = pieceClipPath(edgeStyle, seams, piece.col, piece.row, cols, rows, cellAspect)
+              return path ? (
+                <clipPath id={`cut-${id}`} key={id} clipPathUnits="objectBoundingBox">
+                  <path d={path} />
+                </clipPath>
+              ) : null
+            })}
+          </defs>
+        </svg>
+      ) : null}
       <p className="shrink-0 text-sm text-muted-foreground">
         {puzzle.group} · {pieces} pieces · {placedCount} placed
         {solved ? " · Solved" : ""}
@@ -841,18 +1110,21 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
           <h2 className="text-sm font-medium">Puzzle area</h2>
           <PaneSizeButton active={maximized === "board"} label="puzzle area" onClick={() => togglePane("board")} />
         </div>
-        <div className="flex min-h-0 flex-1 items-center justify-center" style={{ containerType: "size" }}>
-        <div
-          className="relative max-h-full max-w-full overflow-hidden rounded-xl ring-1 ring-foreground/10"
-          style={
-            ratio
-              ? {
-                  height: `min(100cqh, calc(100cqw / ${ratio}))`,
-                  width: `min(100cqw, calc(100cqh * ${ratio}))`,
-                }
-              : { width: "100%", height: "100%" }
-          }
-        >
+        <div ref={boardPaneRef} className="relative min-h-0 flex-1">
+          <div
+            ref={boardScrollRef}
+            className={cn("absolute inset-0 overscroll-contain", boardZoom > 1 ? "overflow-auto" : "overflow-hidden")}
+          >
+            <div className="relative" style={{ width: boardCanvasWidth || "100%", height: boardCanvasHeight || "100%" }}>
+              <div
+                className="absolute overflow-hidden rounded-xl ring-1 ring-foreground/10"
+                style={{
+                  width: boardWidth || "100%",
+                  height: boardHeight || "100%",
+                  left: boardWidth ? boardLeft : 0,
+                  top: boardHeight ? boardTop : 0,
+                }}
+              >
             <div
               ref={boardRef}
               className="grid size-full"
@@ -867,8 +1139,12 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
               {Array.from({ length: pieces }, (_, id) => {
                 const piece = pieceFromId(id, cols)
                 return (
-                  <div key={id} className="border" style={{ borderColor: gridColour }}>
-                    {placed[id] ? <div className="size-full" style={pieceStyle(piece)} /> : null}
+                  <div key={id} className="relative border" style={{ borderColor: gridColour }}>
+                    {placed[id] ? (
+                      <div className={shaped ? undefined : "size-full"} style={pieceStyle(piece)}>
+                        <ShapeRim piece={piece} show />
+                      </div>
+                    ) : null}
                   </div>
                 )
               })}
@@ -908,7 +1184,9 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
                 </span>
               </div>
             ) : null}
-        </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
       <ControlTip label="Drag to change the height of the pieces" side="top">
@@ -942,25 +1220,27 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
         aria-label="Loose pieces"
       >
         <div className={cn("flex h-8 shrink-0 items-center justify-between gap-2", paneHeaderFade)}>
-          <ControlTip label="Drag a piece onto the board, a tray, or a neighbouring piece to join them." side="top">
+          <ControlTip label="Drag a piece onto a grid cell, the board, a tray, or a neighbouring piece to join them." side="top">
             <h2 className="flex h-8 w-fit shrink-0 items-center text-sm font-medium">Pieces</h2>
           </ControlTip>
           <PaneSizeButton active={maximized === "pieces"} label="pieces" onClick={() => togglePane("pieces")} />
         </div>
-        <ControlTip label="Drag a piece onto the board, a tray, or a neighbouring piece to join them." side="top" disabled={drag != null}>
+        <ControlTip label="Drag a piece onto a grid cell, the board, a tray, or a neighbouring piece to join them." side="top" disabled={drag != null}>
         <div
           ref={trayRef}
-          className="flex min-h-0 flex-1 flex-wrap content-center-safe justify-center-safe gap-1 overflow-auto rounded-xl bg-card p-3 ring-1 ring-foreground/10 [scrollbar-gutter:stable] [overflow-anchor:none]"
+          className="min-h-0 flex-1 overflow-auto overscroll-contain rounded-xl bg-card p-3 ring-1 ring-foreground/10 [scrollbar-gutter:stable] [overflow-anchor:none]"
         >
-          {poolGroups.map((group) => {
-            const box = bounds(group.pieceIds, cols)
-            const span = (box.maxCol - box.minCol + 1) * poolWidth
-            const tall = (box.maxRow - box.minRow + 1) * poolHeight
-            if (group.pieceIds.every((id) => drag?.pieceIds.includes(id))) {
-              return <div key={group.key} style={{ width: span, height: tall }} />
-            }
-            return renderDrawerGroup(group.pieceIds, poolWidth, poolHeight, group.key)
-          })}
+          <div ref={poolCanvasRef} className="relative" style={{ width: poolCanvasWidth, height: poolCanvasHeight }}>
+            {poolLayout.map((slot) => {
+              const key = slot.pieceIds.slice().sort((a, b) => a - b).join("-")
+              if (slot.pieceIds.every((id) => drag?.pieceIds.includes(id))) return null
+              return (
+                <div key={key} className="absolute" style={{ left: slot.col * poolStrideX, top: slot.row * poolStrideY }}>
+                  {renderDrawerGroup(slot.pieceIds, poolWidth, poolHeight, key)}
+                </div>
+              )
+            })}
+          </div>
         </div>
         </ControlTip>
       </section>
@@ -1029,16 +1309,29 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
             aria-label="Joined pieces"
             className="max-h-[38%] min-h-24 shrink-0 overflow-auto rounded-xl bg-muted/50 ring-1 ring-foreground/10"
           >
-            <div className="relative min-h-full w-full" style={{ minWidth: matExtent.width, height: matExtent.height || undefined }}>
+            <div
+              className="relative min-h-full w-full"
+              style={{
+                minWidth: matExtent.width + (shaped ? EDGE_PAD * TILE * 2 : 0),
+                height: matExtent.height || undefined,
+                padding: shaped ? EDGE_PAD * TILE : undefined,
+              }}
+            >
               {matClusters.map((cluster) => {
                 const visible = cluster.pieceIds.filter((id) => home[id] === "mat" && !drag?.pieceIds.includes(id))
                 if (!visible.length) return null
                 const box = bounds(visible, cols)
+                const pad = shaped ? EDGE_PAD * TILE : 0
                 return (
                   <div
                     key={cluster.id}
                     className="absolute"
-                    style={{ left: cluster.x, top: cluster.y, width: (box.maxCol - box.minCol + 1) * TILE, height: (box.maxRow - box.minRow + 1) * TILE }}
+                    style={{
+                      left: cluster.x - pad,
+                      top: cluster.y - pad,
+                      width: (box.maxCol - box.minCol + 1) * TILE + pad * 2,
+                      height: (box.maxRow - box.minRow + 1) * TILE + pad * 2,
+                    }}
                   >
                     {visible.map((id) => {
                       const piece = pieceFromId(id, cols)
@@ -1047,14 +1340,16 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
                           key={id}
                           type="button"
                           aria-label={`Piece ${piece.col + 1}, ${piece.row + 1}`}
-                          className="absolute cursor-grab touch-none rounded-md bg-muted ring-1 ring-foreground/15 active:cursor-grabbing"
+                          className={cn("absolute", pieceClass(shaped))}
                           style={{
                             ...pieceStyle(piece, TILE, TILE),
                             left: (piece.col - box.minCol) * TILE,
                             top: (piece.row - box.minRow) * TILE,
                           }}
                           onPointerDown={(event) => onPointerDown(event, id)}
-                        />
+                        >
+                          <ShapeRim piece={piece} show />
+                        </button>
                       )
                     })}
                   </div>
@@ -1091,15 +1386,15 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
                   ref={(node) => {
                     drawerWellRefs.current[drawer] = node
                   }}
-                  className="flex min-h-0 flex-1 flex-wrap content-start items-start gap-1 overflow-auto p-2 [scrollbar-gutter:stable] [overflow-anchor:none]"
+                  className="flex min-h-0 flex-1 flex-wrap content-start items-start gap-1 overflow-auto overscroll-contain p-2 [scrollbar-gutter:stable] [overflow-anchor:none]"
                 >
                   {groups.length === 0 ? (
                     <p className="m-auto px-1 text-center text-xs text-muted-foreground">Drop pieces here</p>
                   ) : (
                     groups.map((group) => {
                       const box = bounds(group.pieceIds, cols)
-                      const span = (box.maxCol - box.minCol + 1) * tileW
-                      const tall = (box.maxRow - box.minRow + 1) * tileH
+                      const span = clusterSpan(box.maxCol - box.minCol + 1, tileW, shaped)
+                      const tall = clusterSpan(box.maxRow - box.minRow + 1, tileH, shaped)
                       return group.pieceIds.every((id) => drag?.pieceIds.includes(id)) ? (
                         <div key={group.key} style={{ width: span, height: tall }} />
                       ) : (
@@ -1120,14 +1415,17 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
         <div className="pointer-events-none fixed z-50" style={{ left: ghost.left, top: ghost.top }}>
           {ghost.pieceIds.map((id) => {
             const piece = pieceFromId(id, cols)
-            const left = (piece.col - ghost.minCol) * ghost.tileW
-            const top = (piece.row - ghost.minRow) * ghost.tileH
+            const bleed = shaped ? EDGE_PAD : 0
+            const left = (piece.col - ghost.minCol) * ghost.tileW - bleed * ghost.tileW
+            const top = (piece.row - ghost.minRow) * ghost.tileH - bleed * ghost.tileH
             return (
               <div
                 key={id}
-                className={cn("absolute overflow-hidden bg-muted shadow-lg ring-2 ring-primary", ghost.onBoard ? "rounded-sm" : "rounded-md")}
+                className={cn("absolute shadow-lg", shaped ? "bg-transparent" : "overflow-hidden bg-muted ring-2 ring-primary", ghost.onBoard || shaped ? "rounded-sm" : "rounded-md")}
                 style={{ ...pieceStyle(piece, ghost.tileW, ghost.tileH, poolRim(id)), left, top }}
-              />
+              >
+                <ShapeRim piece={piece} show={poolRim(id)} />
+              </div>
             )
           })}
         </div>
@@ -1299,6 +1597,17 @@ function hintCell(
   return { ...cell, correct: fits }
 }
 
+function clusterSpan(span: number, cell: number, shaped: boolean) {
+  return span * cell + (shaped ? 2 * EDGE_PAD * cell : 0)
+}
+
+function pieceClass(shaped: boolean) {
+  return cn(
+    "cursor-grab touch-none active:cursor-grabbing",
+    shaped ? "bg-transparent" : "overflow-hidden rounded-md bg-muted ring-1 ring-foreground/15",
+  )
+}
+
 function pieceFromId(id: number, cols: number): Piece {
   return { id, col: id % cols, row: Math.floor(id / cols) }
 }
@@ -1390,12 +1699,29 @@ function snapCluster(cluster: Cluster, others: Cluster[], cols: number) {
   return [current, ...rest]
 }
 
+function clampZoom(value: number) {
+  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, value))
+}
+
+function wheelPixels(event: WheelEvent) {
+  if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) return event.deltaY * 16
+  if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) return event.deltaY * 400
+  return event.deltaY
+}
+
 function contentBox(node: HTMLElement) {
   const style = getComputedStyle(node)
   return {
     width: node.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
     height: node.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom),
   }
+}
+
+function fitBoard(width: number, height: number, ratio: number | null) {
+  if (width <= 0 || height <= 0) return { width: 0, height: 0 }
+  if (!ratio) return { width, height }
+  const fittedWidth = Math.min(width, height * ratio)
+  return { width: fittedWidth, height: fittedWidth / ratio }
 }
 
 function fitPieceGrid(width: number, height: number, count: number, gap: number, aspect = 1) {

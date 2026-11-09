@@ -11,12 +11,19 @@ export type SavedCluster = {
   pieceIds: number[]
 }
 
+export type TraySlot = {
+  pieceIds: number[]
+  col: number
+  row: number
+}
+
 export type SavedGame = {
   placed: boolean[]
   home: SavedBin[]
   clusters: SavedCluster[]
   order: number[]
   nextCluster: number
+  traySlots?: TraySlot[]
   savedAt?: number
 }
 
@@ -84,8 +91,27 @@ function validGame(game: unknown, pieces: number): game is SavedGame {
     Array.isArray(saved.clusters) &&
     saved.clusters.every((cluster) => validCluster(cluster, pieces)) &&
     Number.isInteger(saved.nextCluster) &&
-    saved.nextCluster >= 1
+    saved.nextCluster >= 1 &&
+    validSlots(saved.traySlots, pieces)
   )
+}
+
+function validSlots(value: unknown, pieces: number): value is TraySlot[] | undefined {
+  if (value == null) return true
+  if (!Array.isArray(value)) return false
+  return value.every((slot) => {
+    if (!slot || typeof slot !== "object") return false
+    const item = slot as TraySlot
+    return (
+      Array.isArray(item.pieceIds) &&
+      item.pieceIds.length > 0 &&
+      item.pieceIds.every((id) => Number.isInteger(id) && id >= 0 && id < pieces) &&
+      Number.isInteger(item.col) &&
+      item.col >= 0 &&
+      Number.isInteger(item.row) &&
+      item.row >= 0
+    )
+  })
 }
 
 function booleanList(value: unknown, length: number): value is boolean[] {

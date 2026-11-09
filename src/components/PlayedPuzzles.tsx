@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { ProgressCover } from "@/components/ProgressCover"
 import { buttonVariants } from "@/components/ui/button"
 import { Card, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { Progress } from "@/components/ui/progress"
 import { puzzleHref, resolvePlayedGames } from "@/lib/library"
 import { type Puzzle, type PuzzleGroup } from "@/lib/puzzles"
 import { type PlayedGame } from "@/lib/save"
@@ -108,9 +109,12 @@ function PlayedCard({ game, action }: { game: PlayedCardGame; action: string }) 
       </a>
       <CardHeader>
         <CardTitle>{game.puzzle.title}</CardTitle>
-        <p className="text-sm text-muted-foreground">
-          <span className="font-medium text-foreground tabular-nums">{game.placed}</span> of {game.pieces} pieces · {game.puzzle.group}
-        </p>
+        <div className="flex items-center gap-3">
+          <p className="min-w-0 text-sm text-muted-foreground">
+            <span className="font-medium text-foreground tabular-nums">{game.placed}</span> of {game.pieces} pieces · {game.puzzle.group}
+          </p>
+          <Progress className="ml-auto w-24 shrink-0" value={(game.placed / game.pieces) * 100} aria-label={`${game.placed} of ${game.pieces} pieces`} />
+        </div>
       </CardHeader>
       <CardFooter>
         <a href={href} className={cn(buttonVariants(), "w-full")}>
