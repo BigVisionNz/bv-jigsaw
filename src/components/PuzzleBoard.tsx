@@ -102,6 +102,7 @@ const ZOOM_MAX = 5
 
 export function PuzzleBoard({ puzzle }: { puzzle: PlayablePuzzle }) {
   const [pieces, setPieces] = useState<PieceCountValue>(readPieceCount)
+  const [playStatus, setPlayStatus] = useState("")
   const completionRaw = useSyncExternalStore(subscribeCompletions, completionStoreSnapshot, () => "")
   const completed = useMemo(() => {
     const stored = completionCounts(puzzle.slug)
@@ -133,7 +134,8 @@ export function PuzzleBoard({ puzzle }: { puzzle: PlayablePuzzle }) {
               All puzzles
             </a>
           </ControlTip>
-          <h1 className="truncate text-2xl font-semibold tracking-tight">{puzzle.title}</h1>
+          <h1 className="min-w-32 truncate text-2xl font-semibold tracking-tight">{puzzle.title}</h1>
+          <p className="shrink-0 whitespace-nowrap text-sm text-muted-foreground">{playStatus}</p>
         </div>
         <PieceCount
           value={pieces}
@@ -147,19 +149,20 @@ export function PuzzleBoard({ puzzle }: { puzzle: PlayablePuzzle }) {
           completed={completed}
         />
       </div>
-      <PuzzlePlay key={pieces} puzzle={puzzle} pieces={pieces} />
+      <PuzzlePlay key={pieces} puzzle={puzzle} pieces={pieces} onStatus={setPlayStatus} />
     </div>
     </TooltipProvider>
   )
 }
 
-function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number }) {
+function PuzzlePlay({ puzzle, pieces, onStatus }: { puzzle: PlayablePuzzle; pieces: number; onStatus: (status: string) => void }) {
   const { cols, rows } = puzzleGrid(pieces)
   const boardRef = useRef<HTMLDivElement>(null)
   const boardPaneRef = useRef<HTMLDivElement>(null)
   const boardScrollRef = useRef<HTMLDivElement>(null)
   const boardPanRef = useRef<{ pointerId: number; x: number; y: number; left: number; top: number } | null>(null)
   const poolCanvasRef = useRef<HTMLDivElement>(null)
+  const piecesDoneRef = useRef(false)
   const trayRef = useRef<HTMLDivElement>(null)
   const matRef = useRef<HTMLDivElement>(null)
   const connectRef = useRef<HTMLElement>(null)
@@ -220,6 +223,11 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
   const [imageNotice, setImageNotice] = useState(false)
   const solved = placed.every(Boolean)
   const placedCount = placed.filter(Boolean).length
+  const playStatus = `${puzzle.group} · ${pieces} pieces · ${placedCount} placed${solved ? " · Solved" : ""}`
+
+  useLayoutEffect(() => {
+    onStatus(playStatus)
+  }, [onStatus, playStatus])
   const celebrated = useRef(solved)
   const skipSave = useRef(true)
   useEffect(() => {
@@ -706,6 +714,8 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
     { width: 0, height: 0 },
   )
   const trayIds = order.filter((id) => !placed[id] && home[id] === "tray")
+  const piecesDone = solved && trayIds.length === 0
+  piecesDoneRef.current = piecesDone
   const poolGroups = manualTrayGroups(trayIds).map((pieceIds) => ({
     key: pieceIds.slice().sort((a, b) => a - b).join("-"),
     pieceIds,
@@ -880,6 +890,7 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
       const node = event.currentTarget
       if (!(node instanceof HTMLElement)) return
       event.preventDefault()
+      if (node === trayRef.current && piecesDoneRef.current) return
       const piecesWell = node === trayRef.current
       const current = piecesWell ? pieceZoomRef.current : trayZoomRef.current
       const next = clampZoom(current * Math.exp(-wheelPixels(event) * 0.0016))
@@ -1166,10 +1177,6 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
           </defs>
         </svg>
       ) : null}
-      <p className="shrink-0 text-sm text-muted-foreground">
-        {puzzle.group} · {pieces} pieces · {placedCount} placed
-        {solved ? " · Solved" : ""}
-      </p>
       <div ref={splitRef} className="flex min-h-0 flex-1 flex-col">
       <div
         className={cn(
@@ -1303,11 +1310,17 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
           </ControlTip>
           <PaneSizeButton active={maximized === "pieces"} label="pieces" onClick={() => togglePane("pieces")} />
         </div>
-        <ControlTip label="Drag a piece to a grid cell. Pieces before that cell move behind it, and the pieces there follow. Drop it on a neighbour to join them." side="top" disabled={drag != null}>
+        <ControlTip label="Drag a piece to a grid cell. Pieces before that cell move behind it, and the pieces there follow. Drop it on a neighbour to join them." side="top" disabled={drag != null || piecesDone}>
         <div
           ref={trayRef}
-          className="min-h-0 flex-1 overflow-auto overscroll-contain rounded-xl bg-card p-3 ring-1 ring-foreground/10 [scrollbar-gutter:stable] [overflow-anchor:none]"
+          className={cn(
+            "min-h-0 flex-1 rounded-xl bg-card p-3 ring-1 ring-foreground/10 [overflow-anchor:none]",
+            piecesDone ? "overflow-hidden" : "overflow-auto overscroll-contain [scrollbar-gutter:stable]",
+          )}
         >
+          {piecesDone ? (
+            <p className="flex h-full items-center justify-center text-sm font-medium">Puzzle completed</p>
+          ) : (
           <div ref={poolCanvasRef} className="relative" style={{ width: poolCanvasWidth, height: poolCanvasHeight }}>
             {poolLayout.map((slot) => {
               const key = slot.pieceIds.slice().sort((a, b) => a - b).join("-")
@@ -1319,6 +1332,7 @@ function PuzzlePlay({ puzzle, pieces }: { puzzle: PlayablePuzzle; pieces: number
               )
             })}
           </div>
+          )}
         </div>
         </ControlTip>
       </section>
