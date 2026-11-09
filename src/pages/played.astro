@@ -3,6 +3,8 @@ import { PlayedPuzzles } from "@/components/PlayedPuzzles"
 import Base from "@/layouts/Base.astro"
 import { loadPuzzleGroups } from "@/lib/catalog"
 
+export const prerender = true
+
 const groups = loadPuzzleGroups()
 ---
 

@@ -13,9 +13,18 @@ const DESCRIPTIONS: Record<string, string> = {
   skyline: "Cities seen from the water and the street.",
 }
 
-const puzzlesDir = fileURLToPath(new URL("../../public/puzzles/", import.meta.url))
+function puzzlesDirectory() {
+  // Source URL works in dev. The Cloudflare build bundles this module, so
+  // fall back to the project directory that `astro build` is run from.
+  const fromSource = fileURLToPath(new URL("../../public/puzzles/", import.meta.url))
+  if (existsSync(fromSource)) return fromSource
+  const fromProject = join(process.cwd(), "public", "puzzles")
+  if (existsSync(fromProject)) return fromProject
+  return fromSource
+}
 
 export function loadPuzzleGroups(): PuzzleGroup[] {
+  const puzzlesDir = puzzlesDirectory()
   if (!existsSync(puzzlesDir)) return []
   return readdirSync(puzzlesDir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
@@ -34,7 +43,7 @@ export function loadPuzzle(slug: string | undefined) {
 
 function groupFrom(id: string): PuzzleGroup {
   const used = new Set<string>()
-  const puzzles = readdirSync(join(puzzlesDir, id), { withFileTypes: true })
+  const puzzles = readdirSync(join(puzzlesDirectory(), id), { withFileTypes: true })
     .filter((entry) => entry.isFile() && IMAGE_EXTENSIONS.has(extname(entry.name).toLowerCase()))
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }))
     .map((entry) => {
