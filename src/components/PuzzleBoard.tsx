@@ -1588,8 +1588,29 @@ function MessageDialog({ title, lines, open, onClose }: { title: string; lines: 
   )
 }
 
+const CONFETTI_COLOURS = ["bg-red-500", "bg-amber-400", "bg-yellow-300", "bg-emerald-400", "bg-sky-400", "bg-violet-500", "bg-pink-500", "bg-orange-400"]
+const CONFETTI_SHAPES = ["h-2 w-2 rounded-full", "h-3 w-1.5 rounded-sm", "h-2 w-3 rounded-sm", "h-4 w-1 rounded-full"]
+const CONFETTI = Array.from({ length: 40 }, (_, index) => ({
+  left: `${(index * 17 + 3) % 100}%`,
+  delay: `${(index % 10) * 0.18}s`,
+  duration: `${2.4 + (index % 7) * 0.35}s`,
+  colour: CONFETTI_COLOURS[index % CONFETTI_COLOURS.length],
+  shape: CONFETTI_SHAPES[index % CONFETTI_SHAPES.length],
+}))
+
+function subscribeReducedMotion(onChange: () => void) {
+  const media = window.matchMedia("(prefers-reduced-motion: reduce)")
+  media.addEventListener("change", onChange)
+  return () => media.removeEventListener("change", onChange)
+}
+
+function getReducedMotion() {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches
+}
+
 function CompleteDialog({ title, open, onClose }: { title: string; open: boolean; onClose: () => void }) {
   const panelRef = useRef<HTMLDivElement>(null)
+  const reducedMotion = useSyncExternalStore(subscribeReducedMotion, getReducedMotion, () => false)
   useEffect(() => {
     if (!open) return
     panelRef.current?.focus()
@@ -1603,13 +1624,24 @@ function CompleteDialog({ title, open, onClose }: { title: string; open: boolean
 
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      {reducedMotion ? null : (
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+          {CONFETTI.map((piece, index) => (
+            <span
+              key={index}
+              className={cn("confetti absolute top-0", piece.colour, piece.shape)}
+              style={{ left: piece.left, animationDelay: piece.delay, animationDuration: piece.duration }}
+            />
+          ))}
+        </div>
+      )}
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="puzzle-complete-title"
         tabIndex={-1}
-        className="w-full max-w-sm rounded-xl border border-border bg-background p-6 text-foreground shadow-lg outline-none"
+        className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-background p-6 text-foreground shadow-lg outline-none"
         onClick={(event) => event.stopPropagation()}
       >
         <h2 id="puzzle-complete-title" className="font-heading text-lg font-semibold">

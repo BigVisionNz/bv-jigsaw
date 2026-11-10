@@ -164,10 +164,31 @@
   animation: tray-sections-in 300ms ease;
 }
 
+@keyframes confetti-fall {
+  0% {
+    transform: translateY(-12vh) rotate(0deg);
+    opacity: 1;
+  }
+  75% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(110vh) rotate(540deg);
+    opacity: 0;
+  }
+}
+
+.confetti {
+  animation-name: confetti-fall;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tray-slide,
   .tray-sections-in,
   .page-slide,
+  .confetti,
   ::view-transition-old(gallery),
   ::view-transition-new(gallery) {
     transition: none !important;
