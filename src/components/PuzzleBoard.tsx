@@ -1481,7 +1481,10 @@ function PuzzlePlay({ puzzle, pieces, onStatus }: { puzzle: PlayablePuzzle; piec
                   className="flex min-h-0 flex-1 flex-wrap content-start items-start gap-1 overflow-auto overscroll-contain p-2 [scrollbar-gutter:stable] [overflow-anchor:none]"
                 >
                   {groups.length === 0 ? (
-                    <p className="m-auto px-1 text-center text-xs text-muted-foreground">Drop pieces here</p>
+                    <div className="m-auto flex flex-col items-center gap-1 px-1 text-center">
+                      <p className="text-xs text-muted-foreground">Drop pieces here</p>
+                      <p className="text-xs text-muted-foreground">Drop a piece onto another to connect</p>
+                    </div>
                   ) : (
                     groups.map((group) => {
                       const box = bounds(group.pieceIds, cols)
